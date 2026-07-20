@@ -1,0 +1,7 @@
+{
+  "name": "@msparty/extension",
+  "private": true,
+  "scripts": { "build": "esbuild src/background.ts src/content-script.ts src/popup.ts --bundle --outdir=dist --format=iife --target=chrome110 && cp src/manifest.json src/popup.html dist/" },
+  "dependencies": { "socket.io-client": "^4.7.5" },
+  "devDependencies": { "esbuild": "^0.28.1", "typescript": "^5.5.4" }
+}

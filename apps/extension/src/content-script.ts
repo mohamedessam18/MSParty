@@ -1,0 +1,7 @@
+let applying = false; let previousTime = 0; let isHost = false;
+function player() { return document.querySelector("video") as HTMLVideoElement | null; }
+function apply(state: { isPlaying: boolean; timestamp: number; serverTime: number; role?: string }) { const video = player(); if (!video) return; if (state.role) isHost = state.role === "host"; applying = true; const position = state.isPlaying ? state.timestamp + (Date.now() - state.serverTime) / 1000 : state.timestamp; if (Math.abs(video.currentTime - position) > 0.4) video.currentTime = position; if (state.isPlaying) video.play().catch(() => undefined); else video.pause(); setTimeout(() => { applying = false; }, 300); }
+document.addEventListener("play", () => { const video = player(); if (isHost && !applying && video) chrome.runtime.sendMessage({ type: "control", control: "play", timestamp: video.currentTime }); }, true);
+document.addEventListener("pause", () => { const video = player(); if (isHost && !applying && video) chrome.runtime.sendMessage({ type: "control", control: "pause", timestamp: video.currentTime }); }, true);
+document.addEventListener("timeupdate", () => { const video = player(); if (isHost && !applying && video && Math.abs(video.currentTime - previousTime) > 2) chrome.runtime.sendMessage({ type: "control", control: "seek", timestamp: video.currentTime }); if (video) previousTime = video.currentTime; }, true);
+chrome.runtime.onMessage.addListener(message => { if (message.type === "apply-state") apply(message.state); });
