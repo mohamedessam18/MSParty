@@ -46,6 +46,12 @@ async function cleanupExpiredUploads() {
   for (const video of expired) { try { await r2.send(new DeleteObjectCommand({ Bucket: process.env.R2_BUCKET, Key: video.storageKey })); await prisma.uploadedVideo.delete({ where: { id: video.id } }); } catch {} }
 }
 
+function getLiveTimestamp(party: { isPlaying: boolean; currentTimestamp: number; updatedAt: Date }) {
+  if (!party.isPlaying) return party.currentTimestamp;
+  const elapsed = (Date.now() - new Date(party.updatedAt).getTime()) / 1000;
+  return Math.max(0, party.currentTimestamp + elapsed);
+}
+
 io.use(async (socket, next) => { try { const { userToken } = socket.handshake.auth as { userToken?: string }; if (!userToken) throw new Error("Missing user token"); const user = await tokenUser(userToken); (socket as PartySocket).userId = user.id; (socket as PartySocket).userName = user.name; next(); } catch { next(new Error("Unauthorized")); } });
 io.on("connection", (rawSocket) => {
   const socket = rawSocket as PartySocket;
@@ -53,7 +59,10 @@ io.on("connection", (rawSocket) => {
     if (userToken) { const user = await tokenUser(userToken); if (user.id !== socket.userId) throw new Error("Identity mismatch"); }
     const member = await memberFor(socket, partyId); const party = await prisma.party.findUnique({ where: { id: partyId } }); if (!member || !party) return socket.emit("error:unauthorized", { message: "Not a party member" });
     const dbUser = await prisma.user.findUnique({ where: { id: socket.userId }, select: { avatarUrl: true } });
-    socket.join(roomFor(partyId)); socket.partyId = partyId; socket.emit("sync:state", { isPlaying: party.isPlaying, timestamp: party.currentTimestamp, serverTime: Date.now(), contentType: party.contentType, contentUrl: party.contentUrl, role: member.role }); socket.to(roomFor(partyId)).emit("party:memberJoined", { userId: socket.userId, name: socket.userName, avatarUrl: dbUser?.avatarUrl });
+    socket.join(roomFor(partyId)); socket.partyId = partyId;
+    const liveTime = getLiveTimestamp(party);
+    socket.emit("sync:state", { isPlaying: party.isPlaying, timestamp: liveTime, serverTime: Date.now(), contentType: party.contentType, contentUrl: party.contentUrl, role: member.role });
+    socket.to(roomFor(partyId)).emit("party:memberJoined", { userId: socket.userId, name: socket.userName, avatarUrl: dbUser?.avatarUrl });
   } catch { socket.emit("error:unauthorized", { message: "Invalid party access" }); } });
   socket.on("control:play", ({ partyId, timestamp }) => control(socket, partyId, { isPlaying: true, currentTimestamp: Number(timestamp) || 0 }));
   socket.on("control:pause", ({ partyId, timestamp }) => control(socket, partyId, { isPlaying: false, currentTimestamp: Number(timestamp) || 0 }));
@@ -62,7 +71,17 @@ io.on("connection", (rawSocket) => {
   socket.on("chat:send", async ({ partyId, message }) => { const clean = typeof message === "string" ? message.trim().slice(0, 1000) : ""; if (!clean) return; if ((socket.lastChatAt || 0) > Date.now() - 800) return; socket.lastChatAt = Date.now(); const member = await memberFor(socket, partyId); if (!member) return socket.emit("error:unauthorized", { message: "Not a party member" }); const saved = await prisma.chatMessage.create({ data: { partyId, userId: socket.userId!, message: clean } }); const dbUser = await prisma.user.findUnique({ where: { id: socket.userId }, select: { avatarUrl: true } }); io.to(roomFor(partyId)).emit("chat:message", { userId: socket.userId, name: socket.userName, avatarUrl: dbUser?.avatarUrl, message: clean, sentAt: saved.sentAt }); });
   socket.on("disconnect", () => { if (socket.partyId) socket.to(roomFor(socket.partyId)).emit("party:memberLeft", { userId: socket.userId }); });
 });
-setInterval(async () => { const partyIds = [...io.sockets.adapter.rooms.keys()].filter((key) => key.startsWith("party:")); for (const room of partyIds) { const partyId = room.slice(6); const party = await prisma.party.findUnique({ where: { id: partyId } }); if (party) io.to(room).emit("sync:heartbeat", { isPlaying: party.isPlaying, timestamp: party.currentTimestamp, serverTime: Date.now() }); } }, 5000);
+setInterval(async () => {
+  const partyIds = [...io.sockets.adapter.rooms.keys()].filter((key) => key.startsWith("party:"));
+  for (const room of partyIds) {
+    const partyId = room.slice(6);
+    const party = await prisma.party.findUnique({ where: { id: partyId } });
+    if (party) {
+      const liveTime = getLiveTimestamp(party);
+      io.to(room).emit("sync:heartbeat", { isPlaying: party.isPlaying, timestamp: liveTime, serverTime: Date.now() });
+    }
+  }
+}, 5000);
 setInterval(() => { cleanupExpiredUploads().catch(() => undefined); }, 5 * 60 * 1000);
 cleanupExpiredUploads().catch(() => undefined);
 httpServer.listen(Number(process.env.PORT || 4000), () => console.log("MSParty sync server listening"));
