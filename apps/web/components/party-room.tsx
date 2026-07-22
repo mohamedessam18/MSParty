@@ -48,17 +48,18 @@ export function PartyRoom({ party, userId }: { party: Party; userId: string }) {
   const applyState = useCallback(({ isPlaying, timestamp, serverTime, contentType: incomingType, contentUrl: incomingUrl }: { isPlaying: boolean; timestamp: number; serverTime: number; contentType?: string; contentUrl?: string }) => {
     setPlaying(isPlaying);
     if (incomingType && incomingUrl) { setContentType(incomingType); setContentUrl(incomingUrl); setYtError(null); }
+    if (isHost) return;
     const corrected = isPlaying ? timestamp + (Date.now() - serverTime) / 1000 : timestamp;
     if (uploadedPlayer.current) {
       const currentLocal = uploadedPlayer.current.currentTime || 0;
-      if (!isHost || Math.abs(currentLocal - corrected) > 2.5) {
+      if (Math.abs(currentLocal - corrected) > 2) {
         uploadedPlayer.current.currentTime = corrected;
       }
       isPlaying ? uploadedPlayer.current.play().catch(() => undefined) : uploadedPlayer.current.pause();
     }
     if (player.current) {
       const currentLocal = player.current.currentTime() || 0;
-      if (!isHost || Math.abs(currentLocal - corrected) > 2.5) {
+      if (Math.abs(currentLocal - corrected) > 2) {
         player.current.seekTo(corrected);
       }
       isPlaying ? player.current.play() : player.current.pause();
