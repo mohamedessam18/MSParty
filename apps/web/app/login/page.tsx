@@ -23,11 +23,15 @@ export default function Login() {
       if (result?.error) {
         setError("بيانات الدخول غير صحيحة. تحقق من البريد وكلمة المرور.");
         setLoading(false);
-      } else {
+      } else if (result?.ok || !result?.error) {
         window.location.href = "/dashboard";
+      } else {
+        setError("تعذر تسجيل الدخول. حاول مرة أخرى.");
+        setLoading(false);
       }
-    } catch {
-      setError("حدث خطأ في الاتصال بالسيرفر. حاول مرة أخرى.");
+    } catch (err: any) {
+      console.error("Login Exception:", err);
+      setError(err?.message || "حدث خطأ في الاتصال بالسيرفر. حاول مرة أخرى.");
       setLoading(false);
     }
   }
