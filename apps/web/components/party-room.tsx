@@ -5,7 +5,7 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { YouTubePlayer, type PlayerHandle } from "./youtube-player";
 
 type Party = { id: string; name: string; contentType: string; contentUrl: string | null; hostId: string; isPlaying: boolean; members: { role: string; user: { id: string; name: string; avatarUrl?: string | null } }[] };
-type Message = { userId: string; name: string; message: string; sentAt: string };
+type Message = { userId: string; name: string; message: string; sentAt: string; avatarUrl?: string | null };
 const videoId = (url: string) => {
   if (!url) return "";
   const trimmed = url.trim();
