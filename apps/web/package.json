@@ -1,7 +1,7 @@
 {
   "name": "@msparty/web",
   "private": true,
-  "scripts": { "dev": "next dev", "build": "prisma generate --schema prisma/schema.prisma && next build", "start": "next start", "lint": "next lint" },
+  "scripts": { "dev": "next dev", "build": "npx prisma generate --schema prisma/schema.prisma && next build", "start": "next start", "lint": "next lint" },
   "dependencies": {
     "@aws-sdk/client-s3": "^3.637.0",
     "@aws-sdk/s3-request-presigner": "^3.637.0",
