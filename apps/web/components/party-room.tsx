@@ -39,6 +39,8 @@ export function PartyRoom({ party, userId }: { party: Party; userId: string }) {
   const [replacementUrl, setReplacementUrl] = useState("");
   const [replacementFile, setReplacementFile] = useState<File | null>(null);
   const [changingVideo, setChangingVideo] = useState(false);
+  const [changeProgress, setChangeProgress] = useState<number | null>(null);
+  const [changeError, setChangeError] = useState<string | null>(null);
   const [ytError, setYtError] = useState<string | null>(null);
   const [userInteracted, setUserInteracted] = useState(false);
   const hostName = members.find(member => member.role === "host")?.user.name || "الهوست";
@@ -75,7 +77,64 @@ export function PartyRoom({ party, userId }: { party: Party; userId: string }) {
   function sendMessage(event: React.FormEvent) { event.preventDefault(); if (!message.trim()) return; socket.current?.emit("chat:send", { partyId: party.id, message }); setMessage(""); }
   async function invite() { await navigator.clipboard.writeText(`${window.location.origin}/party/${party.id}/join`); setCopied(true); window.setTimeout(() => setCopied(false), 2000); }
   function react(emoji: string) { setReaction(emoji); window.setTimeout(() => setReaction(""), 1800); }
-  async function changeVideo(event: React.FormEvent) { event.preventDefault(); setChangingVideo(true); setYtError(null); try { let nextType = replacementFile ? "upload" : "youtube"; let nextUrl = replacementUrl; let uploadedVideoId: string | undefined; if (replacementFile) { const signed = await fetch("/api/uploads", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ fileName: replacementFile.name, contentType: replacementFile.type, fileSize: replacementFile.size }) }); if (!signed.ok) throw new Error(); const data = await signed.json(); const upload = await fetch(data.uploadUrl, { method: "PUT", headers: { "Content-Type": replacementFile.type }, body: replacementFile }); if (!upload.ok) throw new Error(); nextUrl = data.fileUrl; uploadedVideoId = data.videoId; } if (!nextUrl) return; socket.current?.emit("control:changeVideo", { partyId: party.id, contentType: nextType, contentUrl: nextUrl, uploadedVideoId }); setReplacementUrl(""); setReplacementFile(null); } finally { setChangingVideo(false); } }
+  async function changeVideo(event: React.FormEvent) {
+    event.preventDefault();
+    setChangingVideo(true);
+    setChangeProgress(null);
+    setChangeError(null);
+    setYtError(null);
+    try {
+      let nextType = replacementFile ? "upload" : "youtube";
+      let nextUrl = replacementUrl;
+      let uploadedVideoId: string | undefined;
+
+      if (replacementFile) {
+        const signed = await fetch("/api/uploads", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ fileName: replacementFile.name, contentType: replacementFile.type, fileSize: replacementFile.size })
+        });
+        if (!signed.ok) {
+          const errData = await signed.json().catch(() => ({}));
+          throw new Error(errData.message || "تعذر تجهيز الرفع. تأكد من إعدادات Cloudflare R2.");
+        }
+        const data = await signed.json();
+
+        setChangeProgress(0);
+        await new Promise<void>((resolve, reject) => {
+          const xhr = new XMLHttpRequest();
+          xhr.open("PUT", data.uploadUrl);
+          xhr.setRequestHeader("Content-Type", replacementFile.type || "video/mp4");
+          xhr.upload.onprogress = (evt) => {
+            if (evt.lengthComputable) {
+              const percent = Math.round((evt.loaded / evt.total) * 100);
+              setChangeProgress(percent);
+            }
+          };
+          xhr.onload = () => {
+            if (xhr.status >= 200 && xhr.status < 300) resolve();
+            else reject(new Error("رفع الفيديو لم يكتمل. تحقق من سياسة CORS في R2."));
+          };
+          xhr.onerror = () => reject(new Error("حدث خطأ في الشبكة أثناء رفع الفيديو."));
+          xhr.send(replacementFile);
+        });
+
+        nextUrl = data.fileUrl;
+        uploadedVideoId = data.videoId;
+      }
+
+      if (!nextUrl) return;
+
+      socket.current?.emit("control:changeVideo", { partyId: party.id, contentType: nextType, contentUrl: nextUrl, uploadedVideoId });
+      setReplacementUrl("");
+      setReplacementFile(null);
+    } catch (err: any) {
+      setChangeError(err.message || "حدث خطأ أثناء رفع وتبديل الفيديو.");
+    } finally {
+      setChangingVideo(false);
+      setChangeProgress(null);
+    }
+  }
 
   return <main className="min-h-screen overflow-x-hidden px-4 py-4 sm:px-7 sm:py-6" onClick={() => !userInteracted && setUserInteracted(true)}>
     <header className="mx-auto flex max-w-[1280px] items-center justify-between gap-4">
@@ -114,7 +173,24 @@ export function PartyRoom({ party, userId }: { party: Party; userId: string }) {
           </div>
         ))}
       </div>
-      {isHost ? <div className="mx-auto mt-9 max-w-4xl rounded-[22px] border border-[#fff6de]/20 bg-[#fff6de]/[.07] p-4"><div className="flex flex-wrap items-center justify-between gap-3"><div><p className="mono text-xs text-[#fff6de]">HOST CONSOLE</p><h2 className="display mt-1 text-lg">أنت ماسك العرض الليلة.</h2></div><div className="flex flex-wrap gap-2"><button onClick={togglePlayback} className="rounded-xl bg-[#fff6de] px-4 py-2 text-sm font-bold text-[#10172b]">{playing ? "إيقاف العرض" : "شغّل الفيديو"}</button><button onClick={() => control("seek", 0)} className="rounded-xl border border-[#fff6de]/25 px-4 py-2 text-sm">ابدأ من الأول</button><button onClick={invite} className="rounded-xl border border-[#fff6de]/25 px-4 py-2 text-sm">ادعُ صحابك</button></div></div><form onSubmit={changeVideo} className="mt-4 rounded-xl bg-[#10172b]/70 p-3"><p className="text-sm text-[#fff6de]">غيّر العرض — الفيديو المرفوع القديم يُحذف بعد 30 دقيقة.</p><div className="mt-2 flex flex-col gap-2 sm:flex-row"><input className="min-w-0 flex-1 rounded-lg bg-[#0d1629] px-3 py-2 text-sm" placeholder="رابط YouTube جديد" value={replacementUrl} onChange={event => { setReplacementUrl(event.target.value); setReplacementFile(null); }} /><input type="file" accept="video/*" className="text-xs" onChange={event => { setReplacementFile(event.target.files?.[0] || null); setReplacementUrl(""); }} /><button disabled={changingVideo} className="rounded-lg bg-[#90e4ff] px-3 py-2 text-sm font-bold text-[#10172b]">{changingVideo ? "جارٍ التبديل" : "غيّر الفيديو"}</button></div></form>{request && <div className="mt-3 flex flex-wrap items-center justify-between gap-3 rounded-xl bg-[#10172b]/70 p-3 text-sm"><span>{request}</span><span className="flex gap-2"><button onClick={() => setRequest("")} className="rounded-lg bg-[#90e4ff] px-3 py-1.5 text-[#10172b]">اسمح</button><button onClick={() => setRequest("")} className="rounded-lg border border-white/15 px-3 py-1.5">مش دلوقتي</button></span></div>}</div> : <div className="mt-9 flex flex-col items-center gap-3 text-center text-sm text-[#d4b7ff]"><span>✦ أنت Viewer — {hostName} ماسك التحكم.</span><button onClick={() => setControlRequested(true)} className="rounded-full border border-[#d4b7ff]/35 px-4 py-2">{controlRequested ? "تم إرسال طلب التحكم" : "اطلب التحكم"}</button></div>}
+      {isHost ? <div className="mx-auto mt-9 max-w-4xl rounded-[22px] border border-[#fff6de]/20 bg-[#fff6de]/[.07] p-4"><div className="flex flex-wrap items-center justify-between gap-3"><div><p className="mono text-xs text-[#fff6de]">HOST CONSOLE</p><h2 className="display mt-1 text-lg">أنت ماسك العرض الليلة.</h2></div><div className="flex flex-wrap gap-2"><button onClick={togglePlayback} className="rounded-xl bg-[#fff6de] px-4 py-2 text-sm font-bold text-[#10172b]">{playing ? "إيقاف العرض" : "شغّل الفيديو"}</button><button onClick={() => control("seek", 0)} className="rounded-xl border border-[#fff6de]/25 px-4 py-2 text-sm">ابدأ من الأول</button><button onClick={invite} className="rounded-xl border border-[#fff6de]/25 px-4 py-2 text-sm">ادعُ صحابك</button></div></div>
+      <form onSubmit={changeVideo} className="mt-4 space-y-2 rounded-xl bg-[#10172b]/70 p-3">
+        <p className="text-sm text-[#fff6de]">غيّر العرض — الفيديو المرفوع القديم يُحذف بعد 30 دقيقة.</p>
+        <div className="flex flex-col gap-2 sm:flex-row">
+          <input className="min-w-0 flex-1 rounded-lg bg-[#0d1629] px-3 py-2 text-sm" placeholder="رابط YouTube جديد" value={replacementUrl} onChange={event => { setReplacementUrl(event.target.value); setReplacementFile(null); setChangeError(null); }} />
+          <input type="file" accept="video/*" className="text-xs" onChange={event => { setReplacementFile(event.target.files?.[0] || null); setReplacementUrl(""); setChangeError(null); }} />
+          <button disabled={changingVideo} className="rounded-lg bg-[#90e4ff] px-3 py-2 text-sm font-bold text-[#10172b] disabled:opacity-60">
+            {changingVideo ? (changeProgress !== null ? `جارٍ الرفع (${changeProgress}%)...` : "جارٍ التبديل...") : "غيّر الفيديو"}
+          </button>
+        </div>
+        {changeProgress !== null && (
+          <div className="h-1.5 w-full overflow-hidden rounded-full bg-[#0d1629]">
+            <div className="h-full bg-gradient-to-r from-[#90e4ff] to-[#d4b7ff] transition-all duration-200" style={{ width: `${changeProgress}%` }} />
+          </div>
+        )}
+        {changeError && <p className="rounded-lg bg-[#ff7b8d]/20 px-3 py-1.5 text-xs text-[#ffd6dd]">{changeError}</p>}
+      </form>
+      {request && <div className="mt-3 flex flex-wrap items-center justify-between gap-3 rounded-xl bg-[#10172b]/70 p-3 text-sm"><span>{request}</span><span className="flex gap-2"><button onClick={() => setRequest("")} className="rounded-lg bg-[#90e4ff] px-3 py-1.5 text-[#10172b]">اسمح</button><button onClick={() => setRequest("")} className="rounded-lg border border-white/15 px-3 py-1.5">مش دلوقتي</button></span></div>}</div> : <div className="mt-9 flex flex-col items-center gap-3 text-center text-sm text-[#d4b7ff]"><span>✦ أنت Viewer — {hostName} ماسك التحكم.</span><button onClick={() => setControlRequested(true)} className="rounded-full border border-[#d4b7ff]/35 px-4 py-2">{controlRequested ? "تم إرسال طلب التحكم" : "اطلب التحكم"}</button></div>}
     </section>
     {!isHost && <><div aria-live="polite" className="pointer-events-none fixed inset-x-0 top-24 z-20 flex justify-center">{reaction && <span className="slide-in rounded-full border border-[#90e4ff]/30 bg-[#10172b]/90 px-5 py-3 text-2xl shadow-xl">{reaction} <small className="text-xs text-[#d9e6ff]">وصلت للشلة</small></span>}</div><div className="mx-auto mt-7 flex max-w-md justify-center gap-2"><span className="self-center text-xs text-[#8091b4]">شارك لحظتك:</span>{["😂", "😮", "❤️", "🔥"].map(emoji => <button onClick={() => react(emoji)} className="rounded-full bg-[#1e2a4a] px-3 py-2 text-lg transition hover:-translate-y-1 hover:bg-[#d4b7ff]" key={emoji}>{emoji}</button>)}</div></>}
     <section className="mx-auto mt-8 max-w-[960px] rounded-[22px] border border-[#90e4ff]/15 bg-[#131d35]/75 p-2"><div className="flex gap-1 border-b border-white/10 px-1 pb-2"><button onClick={() => setTab("chat")} className={`flex-1 rounded-xl px-3 py-2 text-sm ${tab === "chat" ? "bg-[#90e4ff] text-[#10172b]" : "text-[#c7d5ef]"}`}>◌ الدردشة</button><button onClick={() => setTab("people")} className={`flex-1 rounded-xl px-3 py-2 text-sm ${tab === "people" ? "bg-[#d4b7ff] text-[#10172b]" : "text-[#c7d5ef]"}`}>◉ معك {members.length}</button><button onClick={() => setTab("ideas")} className={`flex-1 rounded-xl px-3 py-2 text-sm ${tab === "ideas" ? "bg-[#fff6de] text-[#10172b]" : "text-[#c7d5ef]"}`}>✦ اقتراحات</button></div>
