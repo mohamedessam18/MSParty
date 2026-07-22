@@ -49,10 +49,21 @@ export function PartyRoom({ party, userId }: { party: Party; userId: string }) {
     setPlaying(isPlaying);
     if (incomingType && incomingUrl) { setContentType(incomingType); setContentUrl(incomingUrl); setYtError(null); }
     const corrected = isPlaying ? timestamp + (Date.now() - serverTime) / 1000 : timestamp;
-    player.current?.seekTo(corrected);
-    isPlaying ? player.current?.play() : player.current?.pause();
-    if (uploadedPlayer.current) { uploadedPlayer.current.currentTime = corrected; isPlaying ? uploadedPlayer.current.play().catch(() => undefined) : uploadedPlayer.current.pause(); }
-  }, []);
+    if (uploadedPlayer.current) {
+      const currentLocal = uploadedPlayer.current.currentTime || 0;
+      if (!isHost || Math.abs(currentLocal - corrected) > 2.5) {
+        uploadedPlayer.current.currentTime = corrected;
+      }
+      isPlaying ? uploadedPlayer.current.play().catch(() => undefined) : uploadedPlayer.current.pause();
+    }
+    if (player.current) {
+      const currentLocal = player.current.currentTime() || 0;
+      if (!isHost || Math.abs(currentLocal - corrected) > 2.5) {
+        player.current.seekTo(corrected);
+      }
+      isPlaying ? player.current.play() : player.current.pause();
+    }
+  }, [isHost]);
 
   useEffect(() => {
     let active = true;
