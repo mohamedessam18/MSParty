@@ -4,6 +4,7 @@ import CredentialsProvider from "next-auth/providers/credentials";
 import { prisma } from "./prisma";
 
 export const authOptions: NextAuthOptions = {
+  secret: process.env.NEXTAUTH_SECRET || "17cf1d3748766f64b349f9e711409363fda5f12c7a65d91514ff76edd37bbd00",
   session: { strategy: "jwt" }, pages: { signIn: "/login" },
   providers: [CredentialsProvider({ name: "Email and password", credentials: { email: {}, password: {} }, async authorize(credentials) {
     if (!credentials?.email || !credentials.password) return null;
