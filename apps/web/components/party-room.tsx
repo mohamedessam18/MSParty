@@ -6,7 +6,15 @@ import { YouTubePlayer, type PlayerHandle } from "./youtube-player";
 
 type Party = { id: string; name: string; contentType: string; contentUrl: string | null; hostId: string; isPlaying: boolean; members: { role: string; user: { id: string; name: string; avatarUrl?: string | null } }[] };
 type Message = { userId: string; name: string; message: string; sentAt: string };
-const videoId = (url: string) => { try { const parsed = new URL(url); return parsed.hostname.includes("youtu.be") ? parsed.pathname.slice(1) : parsed.searchParams.get("v") || ""; } catch { return url; } };
+const videoId = (url: string) => {
+  if (!url) return "";
+  const trimmed = url.trim();
+  const regExp = /^.*(youtu.be\/|v\/|u\/\w\/|embed\/|shorts\/|watch\?v=|\&v=)([^#\&\?]*).*/;
+  const match = trimmed.match(regExp);
+  if (match && match[2].length === 11) return match[2];
+  if (/^[a-zA-Z0-9_-]{11}$/.test(trimmed)) return trimmed;
+  return trimmed;
+};
 const initials = (name: string) => name ? name.split(/\s+/).slice(0, 2).map(part => part[0]).join("") : "U";
 
 export function PartyRoom({ party, userId }: { party: Party; userId: string }) {
