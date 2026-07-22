@@ -31,6 +31,7 @@ model Party {
   createdAt DateTime @default(now())
   members PartyMember[]
   messages ChatMessage[]
+  uploadedVideo UploadedVideo?
 }
 model PartyMember {
   id String @id @default(cuid())
@@ -46,9 +47,15 @@ model UploadedVideo {
   id String @id @default(cuid())
   uploaderId String
   uploader User @relation(fields: [uploaderId], references: [id])
+  partyId String? @unique
+  party Party? @relation(fields: [partyId], references: [id], onDelete: SetNull)
   fileUrl String
+  storageKey String @unique
   duration Float?
   uploadedAt DateTime @default(now())
+  cleanupAt DateTime?
+
+  @@index([cleanupAt])
 }
 model ChatMessage {
   id String @id @default(cuid())

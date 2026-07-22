@@ -7,4 +7,6 @@ dist
 *.tsbuildinfo
 .pnpm-store
 .DS_Store
+.node
+
 

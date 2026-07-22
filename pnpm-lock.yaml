@@ -31,6 +31,9 @@ importers:
 
   apps/sync-server:
     dependencies:
+      '@aws-sdk/client-s3':
+        specifier: ^3.637.0
+        version: 3.1090.0
       '@prisma/client':
         specifier: ^5.18.0
         version: 5.22.0(prisma@5.22.0)
