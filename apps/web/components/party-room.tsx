@@ -136,6 +136,62 @@ export function PartyRoom({ party, userId }: { party: Party; userId: string }) {
     }
   }
 
+  const [extractedStreamUrl, setExtractedStreamUrl] = useState<string | null>(null);
+  const [extracting, setExtracting] = useState(false);
+  const [currentTime, setCurrentTime] = useState(0);
+  const [duration, setDuration] = useState(0);
+
+  // Extract stream URL whenever contentUrl changes if type is YouTube
+  useEffect(() => {
+    if (contentType !== "youtube" || !contentUrl) {
+      setExtractedStreamUrl(null);
+      return;
+    }
+    let active = true;
+    setExtracting(true);
+    fetch("/api/youtube-extract", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ url: contentUrl })
+    })
+      .then(res => res.ok ? res.json() : null)
+      .then(data => {
+        if (active && data?.streamUrl) {
+          setExtractedStreamUrl(data.streamUrl);
+        }
+      })
+      .catch(() => undefined)
+      .finally(() => { if (active) setExtracting(false); });
+    return () => { active = false; };
+  }, [contentType, contentUrl]);
+
+  // Sync current time from uploaded video or HTML5 video
+  useEffect(() => {
+    const interval = setInterval(() => {
+      if (uploadedPlayer.current) {
+        setCurrentTime(uploadedPlayer.current.currentTime || 0);
+        setDuration(uploadedPlayer.current.duration || 0);
+      } else if (player.current) {
+        setCurrentTime(player.current.currentTime() || 0);
+      }
+    }, 500);
+    return () => clearInterval(interval);
+  }, []);
+
+  function handleSeekChange(newSec: number) {
+    setCurrentTime(newSec);
+    if (uploadedPlayer.current) uploadedPlayer.current.currentTime = newSec;
+    player.current?.seekTo(newSec);
+    control("seek", newSec);
+  }
+
+  function formatTime(sec: number) {
+    if (!sec || isNaN(sec)) return "00:00";
+    const m = Math.floor(sec / 60);
+    const s = Math.floor(sec % 60);
+    return `${m.toString().padStart(2, "0")}:${s.toString().padStart(2, "0")}`;
+  }
+
   return <main className="min-h-screen overflow-x-hidden px-4 py-4 sm:px-7 sm:py-6" onClick={() => !userInteracted && setUserInteracted(true)}>
     <header className="mx-auto flex max-w-[1280px] items-center justify-between gap-4">
       <a className="display text-xl font-bold" href="/dashboard">MS<span className="text-[#90e4ff]">Party</span></a>
@@ -147,16 +203,64 @@ export function PartyRoom({ party, userId }: { party: Party; userId: string }) {
       <div className="glow-orbit rounded-[22px] bg-[#0a1020] p-2.5">
         <div className="relative overflow-hidden rounded-[18px]">
           {ytError && <div className="absolute inset-0 z-30 flex flex-col items-center justify-center bg-[#0a1020]/95 p-6 text-center text-[#ff7b8d]"><span className="text-3xl">⚠️</span><p className="mt-2 text-base font-bold">{ytError}</p><p className="mt-1 text-xs text-[#aab9d7]">يمكن للهوست تغيير رابط الفيديو إلى فيديو آخر من YouTube أو رفع فيديو خاص.</p></div>}
-          {contentType === "youtube" ? (
+          
+          {contentType === "youtube" && extractedStreamUrl ? (
+            <video
+              ref={uploadedPlayer}
+              src={extractedStreamUrl}
+              className="aspect-video w-full bg-black object-contain"
+              onPlay={() => isHost && control("play", uploadedPlayer.current?.currentTime || 0)}
+              onPause={() => isHost && control("pause", uploadedPlayer.current?.currentTime || 0)}
+              onSeeked={() => isHost && control("seek", uploadedPlayer.current?.currentTime || 0)}
+            />
+          ) : contentType === "youtube" ? (
             <div className="relative aspect-video w-full">
+              {extracting && (
+                <div className="absolute inset-0 z-20 flex items-center justify-center bg-black/70 text-xs text-[#90e4ff]">
+                  <span className="now-pulse">⚡ جارٍ تجهيز ستريم يوتيوب المباشر...</span>
+                </div>
+              )}
               <YouTubePlayer videoId={videoId(contentUrl)} enabled={isHost} onReady={readyPlayer => { player.current = readyPlayer; }} onControl={control} onError={msg => setYtError(msg)} />
               {!isHost && <div className="absolute inset-0 z-10 bg-transparent cursor-not-allowed" onClick={e => { e.preventDefault(); e.stopPropagation(); }} />}
             </div>
           ) : (
-            <video ref={uploadedPlayer} src={contentUrl} controls className="aspect-video w-full bg-black" onPlay={() => isHost && control("play", uploadedPlayer.current?.currentTime || 0)} onPause={() => isHost && control("pause", uploadedPlayer.current?.currentTime || 0)} onSeeked={() => isHost && control("seek", uploadedPlayer.current?.currentTime || 0)} onSeeking={() => { if (!isHost && uploadedPlayer.current && player.current) { /* lock viewer seek */ } }} />
+            <video ref={uploadedPlayer} src={contentUrl} controls={!isHost} className="aspect-video w-full bg-black object-contain" onPlay={() => isHost && control("play", uploadedPlayer.current?.currentTime || 0)} onPause={() => isHost && control("pause", uploadedPlayer.current?.currentTime || 0)} onSeeked={() => isHost && control("seek", uploadedPlayer.current?.currentTime || 0)} />
           )}
+
           {!userInteracted && playing && !isHost && <button onClick={() => setUserInteracted(true)} className="absolute inset-x-0 top-4 z-20 mx-auto w-max rounded-full border border-[#90e4ff]/40 bg-[#10172b]/90 px-4 py-2 text-xs font-bold text-[#90e4ff] shadow-lg hover:bg-[#90e4ff] hover:text-[#10172b]">🔊 اضغط هنا لتنشيط الصوت والمشاهدة الحية</button>}
-          <div className="pointer-events-none absolute inset-x-0 bottom-0 z-20 flex items-end justify-between bg-gradient-to-t from-[#07101f]/90 via-transparent to-transparent px-4 pb-4 pt-16 sm:px-6"><span className="pointer-events-auto rounded-full border border-white/10 bg-[#10172b]/85 px-3 py-2 text-sm"><i className={`ml-2 inline-block h-2 w-2 rounded-full ${playing ? "now-pulse bg-[#ff7b8d]" : "bg-[#aab9d7]"}`} />{playing ? `${hostName} يشغّل الآن` : isHost ? "الفيديو جاهز — شغّله لما تكونوا مستعدين" : `${hostName} لم يبدأ التشغيل بعد`}</span><span className="mono rounded-full bg-[#10172b]/85 px-3 py-2 text-xs text-[#90e4ff]">{playing ? "LIVE" : "PAUSED"}</span></div>
+          
+          <div className="pointer-events-none absolute inset-x-0 bottom-0 z-20 flex flex-col bg-gradient-to-t from-[#07101f]/95 via-[#07101f]/60 to-transparent px-4 pb-3 pt-12 sm:px-6">
+            {/* Custom Host Scrubber / Control Bar */}
+            {isHost && (
+              <div className="pointer-events-auto mb-3 flex items-center gap-3 rounded-xl border border-white/10 bg-[#10172b]/90 p-2 backdrop-blur-md">
+                <button onClick={togglePlayback} className="flex h-9 w-9 items-center justify-center rounded-lg bg-[#90e4ff] text-[#10172b] font-bold transition hover:scale-105">
+                  {playing ? "❚❚" : "▶"}
+                </button>
+                <button onClick={() => handleSeekChange(Math.max(0, currentTime - 10))} className="rounded-lg border border-white/15 px-2.5 py-1 text-xs text-[#d9e6ff] hover:bg-white/10" title="تأخير 10 ثوانٍ">
+                  -10s
+                </button>
+                <button onClick={() => handleSeekChange(currentTime + 10)} className="rounded-lg border border-white/15 px-2.5 py-1 text-xs text-[#d9e6ff] hover:bg-white/10" title="تقديم 10 ثوانٍ">
+                  +10s
+                </button>
+                <input
+                  type="range"
+                  min={0}
+                  max={duration || 100}
+                  step={0.5}
+                  value={currentTime}
+                  onChange={e => handleSeekChange(Number(e.target.value))}
+                  className="h-2 flex-1 cursor-pointer accent-[#90e4ff]"
+                />
+                <span className="mono text-xs text-[#90e4ff]">
+                  {formatTime(currentTime)} {duration > 0 && `/ ${formatTime(duration)}`}
+                </span>
+              </div>
+            )}
+            <div className="flex items-center justify-between">
+              <span className="pointer-events-auto rounded-full border border-white/10 bg-[#10172b]/85 px-3 py-1.5 text-xs sm:text-sm"><i className={`ml-2 inline-block h-2 w-2 rounded-full ${playing ? "now-pulse bg-[#ff7b8d]" : "bg-[#aab9d7]"}`} />{playing ? `${hostName} يشغّل الآن` : isHost ? "الفيديو جاهز — شغّله لما تكونوا مستعدين" : `${hostName} لم يبدأ التشغيل بعد`}</span>
+              <span className="mono rounded-full bg-[#10172b]/85 px-3 py-1.5 text-xs text-[#90e4ff]">{playing ? "LIVE" : "PAUSED"}</span>
+            </div>
+          </div>
         </div>
       </div>
       <div className="relative mx-auto -mt-4 flex max-w-[92%] justify-between px-2">
@@ -173,7 +277,7 @@ export function PartyRoom({ party, userId }: { party: Party; userId: string }) {
           </div>
         ))}
       </div>
-      {isHost ? <div className="mx-auto mt-9 max-w-4xl rounded-[22px] border border-[#fff6de]/20 bg-[#fff6de]/[.07] p-4"><div className="flex flex-wrap items-center justify-between gap-3"><div><p className="mono text-xs text-[#fff6de]">HOST CONSOLE</p><h2 className="display mt-1 text-lg">أنت ماسك العرض الليلة.</h2></div><div className="flex flex-wrap gap-2"><button onClick={togglePlayback} className="rounded-xl bg-[#fff6de] px-4 py-2 text-sm font-bold text-[#10172b]">{playing ? "إيقاف العرض" : "شغّل الفيديو"}</button><button onClick={() => control("seek", 0)} className="rounded-xl border border-[#fff6de]/25 px-4 py-2 text-sm">ابدأ من الأول</button><button onClick={invite} className="rounded-xl border border-[#fff6de]/25 px-4 py-2 text-sm">ادعُ صحابك</button></div></div>
+      {isHost ? <div className="mx-auto mt-9 max-w-4xl rounded-[22px] border border-[#fff6de]/20 bg-[#fff6de]/[.07] p-4"><div className="flex flex-wrap items-center justify-between gap-3"><div><p className="mono text-xs text-[#fff6de]">HOST CONSOLE</p><h2 className="display mt-1 text-lg">أنت ماسك العرض الليلة.</h2></div><div className="flex flex-wrap gap-2"><button onClick={togglePlayback} className="rounded-xl bg-[#fff6de] px-4 py-2 text-sm font-bold text-[#10172b]">{playing ? "إيقاف العرض" : "شغّل الفيديو"}</button><button onClick={() => handleSeekChange(0)} className="rounded-xl border border-[#fff6de]/25 px-4 py-2 text-sm">ابدأ من الأول</button><button onClick={invite} className="rounded-xl border border-[#fff6de]/25 px-4 py-2 text-sm">ادعُ صحابك</button></div></div>
       <form onSubmit={changeVideo} className="mt-4 space-y-2 rounded-xl bg-[#10172b]/70 p-3">
         <p className="text-sm text-[#fff6de]">غيّر العرض — الفيديو المرفوع القديم يُحذف بعد 30 دقيقة.</p>
         <div className="flex flex-col gap-2 sm:flex-row">
@@ -194,7 +298,7 @@ export function PartyRoom({ party, userId }: { party: Party; userId: string }) {
     </section>
     {!isHost && <><div aria-live="polite" className="pointer-events-none fixed inset-x-0 top-24 z-20 flex justify-center">{reaction && <span className="slide-in rounded-full border border-[#90e4ff]/30 bg-[#10172b]/90 px-5 py-3 text-2xl shadow-xl">{reaction} <small className="text-xs text-[#d9e6ff]">وصلت للشلة</small></span>}</div><div className="mx-auto mt-7 flex max-w-md justify-center gap-2"><span className="self-center text-xs text-[#8091b4]">شارك لحظتك:</span>{["😂", "😮", "❤️", "🔥"].map(emoji => <button onClick={() => react(emoji)} className="rounded-full bg-[#1e2a4a] px-3 py-2 text-lg transition hover:-translate-y-1 hover:bg-[#d4b7ff]" key={emoji}>{emoji}</button>)}</div></>}
     <section className="mx-auto mt-8 max-w-[960px] rounded-[22px] border border-[#90e4ff]/15 bg-[#131d35]/75 p-2"><div className="flex gap-1 border-b border-white/10 px-1 pb-2"><button onClick={() => setTab("chat")} className={`flex-1 rounded-xl px-3 py-2 text-sm ${tab === "chat" ? "bg-[#90e4ff] text-[#10172b]" : "text-[#c7d5ef]"}`}>◌ الدردشة</button><button onClick={() => setTab("people")} className={`flex-1 rounded-xl px-3 py-2 text-sm ${tab === "people" ? "bg-[#d4b7ff] text-[#10172b]" : "text-[#c7d5ef]"}`}>◉ معك {members.length}</button><button onClick={() => setTab("ideas")} className={`flex-1 rounded-xl px-3 py-2 text-sm ${tab === "ideas" ? "bg-[#fff6de] text-[#10172b]" : "text-[#c7d5ef]"}`}>✦ اقتراحات</button></div>
-      {tab === "chat" && <div className="p-3 sm:p-4"><div aria-live="polite" className="max-h-52 min-h-24 space-y-3 overflow-y-auto">{messages.length ? messages.map((entry, index) => <article className="slide-in flex gap-2 text-sm" key={`${entry.sentAt}-${index}`}><span className="flex h-7 w-7 shrink-0 items-center justify-center rounded-full bg-[#1e2a4a] text-[10px] text-[#90e4ff]">{initials(entry.name)}</span><p className="rounded-2xl rounded-tr-sm bg-[#1e2a4a] px-3 py-2"><b className="ml-1 text-[#90e4ff]">{entry.name}</b>{entry.message}</p></article>) : <p className="flex min-h-24 items-center justify-center text-center text-sm text-[#aab9d7]">لسه محدش كتب حاجة.<br />ابدأوا بسؤال عن أحلى مشهد.</p>}</div><form className="mt-3 flex gap-2" onSubmit={sendMessage}><input className="min-w-0 flex-1 rounded-xl border border-white/10 bg-[#0d1629] px-4 py-3 text-sm text-white" placeholder="اكتب رسالة للسهرة" value={message} onChange={event => setMessage(event.target.value)} /><button className="rounded-xl bg-[#90e4ff] px-4 py-3 text-sm font-bold text-[#10172b]">إرسال</button></form></div>}
+      {tab === "chat" && <div className="p-3 sm:p-4"><div aria-live="polite" className="max-h-52 min-h-24 space-y-3 overflow-y-auto">{messages.length ? messages.map((entry, index) => <article className="slide-in flex gap-2 text-sm" key={`${entry.sentAt}-${index}`}>{entry.avatarUrl ? <img src={entry.avatarUrl} alt={entry.name} className="h-7 w-7 shrink-0 rounded-full object-cover" /> : <span className="flex h-7 w-7 shrink-0 items-center justify-center rounded-full bg-[#1e2a4a] text-[10px] text-[#90e4ff]">{initials(entry.name)}</span>}<p className="rounded-2xl rounded-tr-sm bg-[#1e2a4a] px-3 py-2"><b className="ml-1 text-[#90e4ff]">{entry.name}</b>{entry.message}</p></article>) : <p className="flex min-h-24 items-center justify-center text-center text-sm text-[#aab9d7]">لسه محدش كتب حاجة.<br />ابدأوا بسؤال عن أحلى مشهد.</p>}</div><form className="mt-3 flex gap-2" onSubmit={sendMessage}><input className="min-w-0 flex-1 rounded-xl border border-white/10 bg-[#0d1629] px-4 py-3 text-sm text-white" placeholder="اكتب رسالة للسهرة" value={message} onChange={event => setMessage(event.target.value)} /><button className="rounded-xl bg-[#90e4ff] px-4 py-3 text-sm font-bold text-[#10172b]">إرسال</button></form></div>}
       {tab === "people" && <div className="grid gap-2 p-3 sm:grid-cols-2">{members.map(member => <div className="flex items-center gap-3 rounded-xl bg-[#1e2a4a]/55 p-3" key={member.user.id}>{member.user.avatarUrl ? <img src={member.user.avatarUrl} alt={member.user.name} className="h-9 w-9 rounded-full object-cover" /> : <span className="flex h-9 w-9 items-center justify-center rounded-full bg-[#d4b7ff] text-xs font-bold text-[#10172b]">{initials(member.user.name)}</span>}<span className="flex-1 text-sm">{member.user.id === userId ? "أنت" : member.user.name}</span><span className={`rounded-full px-2 py-1 text-xs ${member.role === "host" ? "bg-[#fff6de] text-[#10172b]" : "bg-[#10172b] text-[#aab9d7]"}`}>{member.role === "host" ? "Host" : "Viewer"}</span></div>)}</div>}
       {tab === "ideas" && <div className="p-4"><p className="text-sm text-[#aab9d7]">{isHost ? "اختار اقتراحًا لما تخلصوا الفيديو الحالي." : "رشّحوا حاجة للسهرة الجاية."}</p><div className="mt-3 space-y-2">{ideas.map((item, index) => <div className="flex items-center justify-between rounded-xl bg-[#1e2a4a]/60 p-3 text-sm" key={`${item}-${index}`}><span>{item}</span>{isHost && <button className="rounded-lg bg-[#90e4ff] px-3 py-1 text-xs font-bold text-[#10172b]">بعد الفيلم</button>}</div>)}</div>{!isHost && <form className="mt-3 flex gap-2" onSubmit={event => { event.preventDefault(); if (idea.trim()) { setIdeas(items => [...items, idea.trim()]); setIdea(""); } }}><input className="min-w-0 flex-1 rounded-xl border border-white/10 bg-[#0d1629] px-4 py-3 text-sm text-white" placeholder="اسم الفيلم أو رابط YouTube" value={idea} onChange={event => setIdea(event.target.value)} /><button className="rounded-xl bg-[#fff6de] px-4 py-3 text-sm font-bold text-[#10172b]">اقترح</button></form>}{!ideas.length && <p className="mt-3 rounded-xl border border-dashed border-white/10 p-4 text-center text-sm text-[#8091b4]">مفيش اقتراحات لسه.</p>}</div>}
     </section>
