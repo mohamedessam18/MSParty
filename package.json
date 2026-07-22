@@ -5,7 +5,8 @@
     "dev": "npm run dev --workspace=@msparty/web",
     "dev:web": "npm run dev --workspace=@msparty/web",
     "dev:sync": "npm run dev --workspace=@msparty/sync-server",
-    "build": "npm run build --workspaces",
+    "build": "prisma generate --schema apps/web/prisma/schema.prisma && pnpm --filter @msparty/sync-server build",
+    "start": "pnpm --filter @msparty/sync-server start",
     "prisma:generate": "prisma generate --schema apps/web/prisma/schema.prisma",
     "prisma:migrate": "prisma migrate dev --schema apps/web/prisma/schema.prisma",
     "prisma:deploy": "prisma migrate deploy --schema apps/web/prisma/schema.prisma"
