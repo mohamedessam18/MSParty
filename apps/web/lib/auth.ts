@@ -8,7 +8,8 @@ export const authOptions: NextAuthOptions = {
   session: { strategy: "jwt" }, pages: { signIn: "/login" },
   providers: [CredentialsProvider({ name: "Email and password", credentials: { email: {}, password: {} }, async authorize(credentials) {
     if (!credentials?.email || !credentials.password) return null;
-    const user = await prisma.user.findUnique({ where: { email: credentials.email } });
+    const cleanEmail = credentials.email.trim().toLowerCase();
+    const user = await prisma.user.findUnique({ where: { email: cleanEmail } });
     if (!user?.passwordHash || !(await bcrypt.compare(credentials.password, user.passwordHash))) return null;
     return { id: user.id, email: user.email, name: user.name, image: user.avatarUrl };
   } })],
