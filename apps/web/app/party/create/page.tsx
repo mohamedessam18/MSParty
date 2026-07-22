@@ -36,7 +36,10 @@ export default function CreateParty() {
       if (contentType === "upload") {
         if (!file) throw new Error("اختار فيديو لرفعه أولًا.");
         const signed = await fetch("/api/uploads", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ fileName: file.name, contentType: file.type, fileSize: file.size }) });
-        if (!signed.ok) throw new Error("تعذر تجهيز رفع الفيديو. راجع إعدادات Cloudflare R2.");
+        if (!signed.ok) {
+          const errData = await signed.json().catch(() => ({}));
+          throw new Error(errData.message || "تعذر تجهيز رفع الفيديو. راجع إعدادات Cloudflare R2.");
+        }
         const { uploadUrl, fileUrl, videoId } = await signed.json();
 
         setUploadProgress(0);
