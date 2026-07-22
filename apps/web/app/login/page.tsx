@@ -31,7 +31,7 @@ export default function Login() {
       }
     } catch (err: any) {
       console.error("Login Exception:", err);
-      setError(err?.message || "حدث خطأ في الاتصال بالسيرفر. حاول مرة أخرى.");
+      setError("بيانات الدخول غير صحيحة أو السيرفر مشغول. تحقق من بياناتك وحاول ثانية.");
       setLoading(false);
     }
   }
