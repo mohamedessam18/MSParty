@@ -9,7 +9,22 @@ export const authOptions: NextAuthOptions = {
     if (!credentials?.email || !credentials.password) return null;
     const user = await prisma.user.findUnique({ where: { email: credentials.email } });
     if (!user?.passwordHash || !(await bcrypt.compare(credentials.password, user.passwordHash))) return null;
-    return { id: user.id, email: user.email, name: user.name };
+    return { id: user.id, email: user.email, name: user.name, image: user.avatarUrl };
   } })],
-  callbacks: { async jwt({ token, user }) { if (user) token.sub = user.id; return token; } }
+  callbacks: {
+    async jwt({ token, user }) {
+      if (user) {
+        token.sub = user.id;
+        token.picture = user.image;
+      }
+      return token;
+    },
+    async session({ session, token }) {
+      if (session.user && token.sub) {
+        (session.user as any).id = token.sub;
+        session.user.image = token.picture as string | null;
+      }
+      return session;
+    }
+  }
 };
