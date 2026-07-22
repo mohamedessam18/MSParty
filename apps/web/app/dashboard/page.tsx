@@ -1,6 +1,6 @@
 "use client";
 import Link from "next/link";
-import { useEffect, useState } from "react";
+import { signOut } from "next-auth/react";
 
 type Party = { id: string; name: string; contentType: string; host: { name: string }; _count: { members: number } };
 type UserProfile = { id: string; name: string; email: string; avatarUrl: string | null };
@@ -54,7 +54,6 @@ export default function Dashboard() {
     try {
       let finalAvatarUrl = editAvatarUrl;
 
-      // If user selected a file and R2 upload route is working, upload it
       if (avatarFile) {
         try {
           const signed = await fetch("/api/uploads", {
@@ -70,7 +69,7 @@ export default function Dashboard() {
             }
           }
         } catch {
-          // fallback to base64 editAvatarUrl if cloud upload fails
+          // fallback
         }
       }
 
@@ -98,25 +97,39 @@ export default function Dashboard() {
   return (
     <main className="mx-auto min-h-screen max-w-5xl px-5 py-7 sm:px-8">
       <header className="flex flex-wrap items-center justify-between gap-4">
-        <Link className="display text-xl font-bold" href="/">MS<span className="text-[#90e4ff]">Party</span></Link>
-        <div className="flex items-center gap-3">
+        <div className="flex items-center gap-6">
+          <Link className="display text-xl font-bold" href="/">MS<span className="text-[#90e4ff]">Party</span></Link>
+          <nav className="hidden items-center gap-4 text-xs sm:flex">
+            <Link className="text-[#d6e4ff] hover:text-[#90e4ff]" href="/dashboard">بارتياتي</Link>
+            <Link className="text-[#d6e4ff] hover:text-[#90e4ff]" href="/join">انضمام بكود</Link>
+          </nav>
+        </div>
+        <div className="flex flex-wrap items-center gap-2.5 sm:gap-3">
+          <Link className="rounded-full border border-white/15 px-3 py-1.5 text-xs text-[#d6e4ff] hover:bg-white/5 sm:px-4 sm:py-2 text-sm" href="/join">ادخل بكود</Link>
+          <Link className="rounded-full bg-[#90e4ff] px-4 py-2 text-sm font-bold text-[#10172b]" href="/party/create">اعمل بارتي</Link>
           {user && (
             <button
               onClick={() => { setShowProfileModal(true); setEditName(user.name); setEditAvatarUrl(user.avatarUrl); }}
-              className="flex items-center gap-2.5 rounded-full border border-white/15 bg-[#131d35] px-3.5 py-1.5 transition hover:border-[#90e4ff]/50"
+              className="flex items-center gap-2 rounded-full border border-white/15 bg-[#131d35] px-3 py-1.5 transition hover:border-[#90e4ff]/50"
+              title="تعديل البروفايل"
             >
               {user.avatarUrl ? (
-                <img src={user.avatarUrl} alt={user.name} className="h-7 w-7 rounded-full object-cover" />
+                <img src={user.avatarUrl} alt={user.name} className="h-6 w-6 rounded-full object-cover" />
               ) : (
-                <span className="flex h-7 w-7 items-center justify-center rounded-full bg-gradient-to-br from-[#d4b7ff] to-[#90e4ff] text-xs font-bold text-[#10172b]">
+                <span className="flex h-6 w-6 items-center justify-center rounded-full bg-gradient-to-br from-[#d4b7ff] to-[#90e4ff] text-[10px] font-bold text-[#10172b]">
                   {initials(user.name)}
                 </span>
               )}
-              <span className="text-xs font-semibold text-[#e8dcff]">{user.name}</span>
-              <span className="text-xs text-[#90e4ff]">✎</span>
+              <span className="text-xs font-semibold text-[#e8dcff] max-w-24 truncate">{user.name}</span>
             </button>
           )}
-          <Link className="rounded-full bg-[#90e4ff] px-4 py-2 text-sm font-bold text-[#10172b]" href="/party/create">اعمل بارتي</Link>
+          <button
+            onClick={() => signOut({ callbackUrl: "/" })}
+            className="rounded-full border border-[#ff7b8d]/30 bg-[#ff7b8d]/10 px-3 py-1.5 text-xs font-semibold text-[#ffd6dd] hover:bg-[#ff7b8d]/20"
+            title="تسجيل الخروج"
+          >
+            خروج
+          </button>
         </div>
       </header>
 

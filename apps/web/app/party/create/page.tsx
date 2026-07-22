@@ -74,8 +74,11 @@ export default function CreateParty() {
 
   return (
     <main className="mx-auto min-h-screen max-w-2xl px-5 py-7">
-      <Link className="display text-xl font-bold" href="/">MS<span className="text-[#90e4ff]">Party</span></Link>
-      <section className="mt-14">
+      <header className="flex items-center justify-between">
+        <Link className="display text-xl font-bold" href="/">MS<span className="text-[#90e4ff]">Party</span></Link>
+        <Link className="rounded-full border border-white/15 px-4 py-1.5 text-xs text-[#d6e4ff] hover:bg-white/5" href="/dashboard">← لوحة التحكم</Link>
+      </header>
+      <section className="mt-10">
         <p className="mono text-xs text-[#90e4ff]">HOST A NIGHT</p>
         <h1 className="display mt-2 text-4xl font-semibold">افتح الشاشة للشلة.</h1>
         <p className="mt-3 text-[#aab9d7]">اختار رابط YouTube أو ارفع فيديو مؤقت للبارتي فقط.</p>
