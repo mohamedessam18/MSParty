@@ -1,14 +1,14 @@
 import { Prisma } from "@prisma/client";
 import { NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
-import { requireUser } from "@/lib/current-user";
+import { requireDbUser, requireUser } from "@/lib/current-user";
 import { generatePartyCode } from "@/lib/party-code";
 
 export async function GET() {
   try {
     const user = await requireUser();
     const parties = await prisma.party.findMany({
-      where: { members: { some: { user: { email: user.email! } } } },
+      where: { members: { some: { userId: user.id } } },
       orderBy: { createdAt: "desc" },
       include: { host: { select: { name: true } }, _count: { select: { members: true } } }
     });
@@ -19,11 +19,17 @@ export async function GET() {
 }
 
 export async function POST(request: Request) {
-  let sessionUser;
+  let user;
   try {
-    sessionUser = await requireUser();
+    user = await requireDbUser();
   } catch {
     return NextResponse.json({ message: "Unauthorized" }, { status: 401 });
+  }
+
+  // Guests can watch and chat, but a party outlives the browser that made it.
+  // Hosting needs an account that can be signed back into.
+  if (user.isGuest) {
+    return NextResponse.json({ message: "لازم تعمل حساب عشان تستضيف بارتي." }, { status: 403 });
   }
 
   const { name, contentType, contentUrl, uploadedVideoId } = await request.json();
@@ -32,7 +38,6 @@ export async function POST(request: Request) {
   }
 
   try {
-    const user = await prisma.user.findUniqueOrThrow({ where: { email: sessionUser.email! } });
 
     // Codes are short enough that collisions are possible; retry a few times
     // before giving up rather than failing the whole creation on one clash.

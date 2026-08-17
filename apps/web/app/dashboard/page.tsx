@@ -10,7 +10,7 @@ import { Modal } from "@/components/ui/modal";
 import { Wordmark } from "@/components/ui/wordmark";
 
 type Party = { id: string; code: string; name: string; contentType: string; host: { name: string }; _count: { members: number } };
-type UserProfile = { id: string; name: string; email: string; avatarUrl: string | null };
+type UserProfile = { id: string; name: string; email: string | null; avatarUrl: string | null; isGuest: boolean };
 
 const contentLabel: Record<string, string> = { youtube: "YouTube", upload: "فيديو مرفوع", streaming: "إكستنشن" };
 const contentIcon: Record<string, string> = { youtube: "▶", upload: "▣", streaming: "◌" };
@@ -27,6 +27,33 @@ export default function Dashboard() {
   const [saving, setSaving] = useState(false);
   const [message, setMessage] = useState("");
   const [error, setError] = useState("");
+
+  const [upgradeOpen, setUpgradeOpen] = useState(false);
+  const [upgradeEmail, setUpgradeEmail] = useState("");
+  const [upgradePassword, setUpgradePassword] = useState("");
+  const [upgradeError, setUpgradeError] = useState("");
+  const [upgrading, setUpgrading] = useState(false);
+
+  async function upgrade(event: React.FormEvent) {
+    event.preventDefault();
+    setUpgradeError("");
+    setUpgrading(true);
+    try {
+      const response = await fetch("/api/user/upgrade", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ email: upgradeEmail, password: upgradePassword })
+      });
+      const data = await response.json().catch(() => ({}));
+      if (!response.ok) throw new Error(data.message || "تعذر تحويل الحساب.");
+      setUser(data);
+      setUpgradeOpen(false);
+    } catch (err: any) {
+      setUpgradeError(err.message);
+    } finally {
+      setUpgrading(false);
+    }
+  }
 
   useEffect(() => {
     fetch("/api/parties")
@@ -134,6 +161,18 @@ export default function Dashboard() {
         </div>
       </header>
 
+      {user?.isGuest && (
+        <div className="mt-6 flex flex-wrap items-center justify-between gap-3 rounded-lg border border-gold/30 bg-gold/[.06] p-4">
+          <p className="text-sm text-ivory">
+            <b className="text-gold">إنت داخل كضيف.</b> حسابك مربوط بالمتصفح ده بس — حوّله لحساب دائم عشان تدخل
+            من أي جهاز وتقدر تستضيف بارتي.
+          </p>
+          <Button size="sm" onClick={() => setUpgradeOpen(true)}>
+            حوّله لحساب دائم
+          </Button>
+        </div>
+      )}
+
       <section className="mt-12">
         <Kicker>لياليك</Kicker>
         <div className="mt-2 flex flex-wrap items-end justify-between gap-3">
@@ -183,6 +222,24 @@ export default function Dashboard() {
           {!ready && <div className="h-20 animate-pulse rounded-lg border border-velvet-hi bg-velvet/40" />}
         </div>
       </section>
+
+      <Modal open={upgradeOpen} onClose={() => setUpgradeOpen(false)} title="حوّل حسابك لدائم">
+        <form onSubmit={upgrade} className="mt-5 space-y-4">
+          <p className="text-sm leading-7 text-ivory-dim">
+            سهراتك ورسايلك كلها هتفضل زي ما هي — إحنا بنضيف بريد وكلمة مرور لنفس الحساب.
+          </p>
+          <Field label="البريد الإلكتروني">
+            <Input required type="email" dir="ltr" value={upgradeEmail} onChange={event => setUpgradeEmail(event.target.value)} />
+          </Field>
+          <Field label="كلمة المرور" hint="8 أحرف على الأقل">
+            <Input required minLength={8} type="password" dir="ltr" value={upgradePassword} onChange={event => setUpgradePassword(event.target.value)} />
+          </Field>
+          {upgradeError && <FormError>{upgradeError}</FormError>}
+          <Button type="submit" disabled={upgrading} className="w-full">
+            {upgrading ? "جارٍ التحويل..." : "حوّل الحساب"}
+          </Button>
+        </form>
+      </Modal>
 
       <Modal open={open} onClose={() => setOpen(false)} title="تعديل البروفايل">
         <form onSubmit={saveProfile} className="mt-5 space-y-5">

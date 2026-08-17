@@ -5,13 +5,12 @@ import { requireUser } from "@/lib/current-user";
 // Per-user response; never let it sit in a shared cache.
 export const dynamic = "force-dynamic";
 
+const SELECT = { id: true, name: true, email: true, avatarUrl: true, isGuest: true } as const;
+
 export async function GET() {
   try {
-    const sessionUser = await requireUser();
-    const user = await prisma.user.findUnique({
-      where: { email: sessionUser.email! },
-      select: { id: true, name: true, email: true, avatarUrl: true }
-    });
+    const { id } = await requireUser();
+    const user = await prisma.user.findUnique({ where: { id }, select: SELECT });
     if (!user) return NextResponse.json({ message: "User not found" }, { status: 404 });
     return NextResponse.json(user);
   } catch {
@@ -21,14 +20,12 @@ export async function GET() {
 
 export async function PATCH(request: Request) {
   try {
-    const sessionUser = await requireUser();
-    const body = await request.json();
-    const { name, avatarUrl } = body;
+    const { id } = await requireUser();
+    const { name, avatarUrl } = await request.json();
 
-    const dataToUpdate: { name?: string; avatarUrl?: string | null } = {};
-    if (typeof name === "string" && name.trim()) {
-      dataToUpdate.name = name.trim().slice(0, 50);
-    }
+    const data: { name?: string; avatarUrl?: string | null } = {};
+    if (typeof name === "string" && name.trim()) data.name = name.trim().slice(0, 50);
+
     if (avatarUrl !== undefined) {
       // Reject data: URIs outright. A failed upload used to fall back to an
       // inline base64 image, which put megabytes into this column and then
@@ -38,16 +35,11 @@ export async function PATCH(request: Request) {
       if (avatarUrl !== null && !isStorableUrl) {
         return NextResponse.json({ message: "رابط الصورة غير صالح." }, { status: 400 });
       }
-      dataToUpdate.avatarUrl = isStorableUrl ? avatarUrl : null;
+      data.avatarUrl = isStorableUrl ? avatarUrl : null;
     }
 
-    const updatedUser = await prisma.user.update({
-      where: { email: sessionUser.email! },
-      data: dataToUpdate,
-      select: { id: true, name: true, email: true, avatarUrl: true }
-    });
-
-    return NextResponse.json(updatedUser);
+    const updated = await prisma.user.update({ where: { id }, data, select: SELECT });
+    return NextResponse.json(updated);
   } catch {
     return NextResponse.json({ message: "Unable to update profile" }, { status: 500 });
   }

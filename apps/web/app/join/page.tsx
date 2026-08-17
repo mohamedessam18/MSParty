@@ -2,6 +2,7 @@
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useState } from "react";
+import { GuestJoin } from "@/components/guest-join";
 import { Button } from "@/components/ui/button";
 import { Card, Kicker } from "@/components/ui/card";
 import { FormError } from "@/components/ui/input";
@@ -12,6 +13,25 @@ export default function JoinPage() {
   const [code, setCode] = useState("");
   const [error, setError] = useState("");
   const [loading, setLoading] = useState(false);
+  const [needsIdentity, setNeedsIdentity] = useState(false);
+
+  async function attempt() {
+    const response = await fetch("/api/parties/join-by-code", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ code })
+    });
+    const data = await response.json().catch(() => ({}));
+    // 401 means "we don't know who you are yet", not "bad code" — offer the
+    // guest path instead of sending someone away to build an account.
+    if (response.status === 401) {
+      setNeedsIdentity(true);
+      setLoading(false);
+      return;
+    }
+    if (!response.ok) throw new Error(data.message || "تعذر الدخول بالكود ده.");
+    router.replace(`/party/${data.id}`);
+  }
 
   async function submit(event: React.FormEvent) {
     event.preventDefault();
@@ -19,14 +39,7 @@ export default function JoinPage() {
     if (code.length < 6) return setError("الكود ٦ حروف. راجع اللي بعتهولك الهوست.");
     setLoading(true);
     try {
-      const response = await fetch("/api/parties/join-by-code", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ code })
-      });
-      const data = await response.json().catch(() => ({}));
-      if (!response.ok) throw new Error(data.message || "تعذر الدخول بالكود ده.");
-      router.replace(`/party/${data.id}`);
+      await attempt();
     } catch (err: any) {
       setError(err.message);
       setLoading(false);
@@ -74,9 +87,28 @@ export default function JoinPage() {
             {loading ? "جارٍ الدخول..." : "ادخل البارتي"}
           </Button>
         </form>
+
+        {needsIdentity && (
+          <div className="mt-6 border-t border-velvet-hi pt-5">
+            <GuestJoin
+              onDone={() => {
+                setNeedsIdentity(false);
+                setLoading(true);
+                attempt().catch(err => {
+                  setError(err.message);
+                  setLoading(false);
+                });
+              }}
+            />
+          </div>
+        )}
+
         <div className="mt-6 flex justify-between border-t border-velvet-hi pt-4 text-xs">
           <Link className="text-gold hover:underline" href="/party/create">
             عايز تستضيف؟ أنشئ بارتي
+          </Link>
+          <Link className="text-ivory-dim hover:text-ivory" href="/login">
+            عندي حساب
           </Link>
         </div>
       </Card>

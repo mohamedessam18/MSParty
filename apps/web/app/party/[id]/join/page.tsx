@@ -3,6 +3,7 @@ import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { signOut } from "next-auth/react";
 import { useEffect, useState } from "react";
+import { GuestJoin } from "@/components/guest-join";
 import { Avatar } from "@/components/ui/avatar";
 import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
@@ -45,14 +46,23 @@ export default function JoinParty({ params }: { params: { id: string } }) {
             <span aria-hidden className="text-3xl">
               🚪
             </span>
-            <h1 className="display mt-3 text-2xl text-ivory">مش قادرين ندخّلك</h1>
+            <h1 className="display mt-3 text-2xl text-ivory">مكانك مستنيك</h1>
             <p className="mt-2 text-sm leading-7 text-ivory-dim">{error}</p>
-            <div className="mt-5 flex justify-center gap-2">
-              <Link href="/login">
-                <Button>سجّل دخول</Button>
+
+            <div className="mt-6 border-t border-velvet-hi pt-5">
+              <GuestJoin onDone={() => window.location.reload()} />
+            </div>
+
+            <div className="mt-5 flex justify-center gap-2 border-t border-velvet-hi pt-5">
+              <Link href={`/login?next=/party/${params.id}/join`}>
+                <Button variant="ghost" size="sm">
+                  عندي حساب
+                </Button>
               </Link>
-              <Link href="/join">
-                <Button variant="ghost">ادخل بكود</Button>
+              <Link href="/register">
+                <Button variant="ghost" size="sm">
+                  اعمل حساب
+                </Button>
               </Link>
             </div>
           </>

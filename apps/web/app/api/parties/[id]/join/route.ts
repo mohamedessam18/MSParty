@@ -1,11 +1,10 @@
 import { NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
-import { requireUser } from "@/lib/current-user";
+import { requireDbUser } from "@/lib/current-user";
 
 export async function POST(_: Request, { params }: { params: { id: string } }) {
   try {
-    const sessionUser = await requireUser();
-    const user = await prisma.user.findUniqueOrThrow({ where: { email: sessionUser.email! } });
+    const user = await requireDbUser();
 
     const party = await prisma.party.findUnique({ where: { id: params.id }, select: { isLocked: true } });
     if (!party) return NextResponse.json({ message: "البارتي ده مش موجود." }, { status: 404 });

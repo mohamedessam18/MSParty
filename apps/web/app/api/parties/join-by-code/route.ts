@@ -1,12 +1,12 @@
 import { NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
-import { requireUser } from "@/lib/current-user";
+import { requireDbUser } from "@/lib/current-user";
 import { normalizePartyCode } from "@/lib/party-code";
 
 export async function POST(request: Request) {
-  let sessionUser;
+  let user;
   try {
-    sessionUser = await requireUser();
+    user = await requireDbUser();
   } catch {
     return NextResponse.json({ message: "سجّل دخولك أولًا للانضمام." }, { status: 401 });
   }
@@ -18,7 +18,6 @@ export async function POST(request: Request) {
   const party = await prisma.party.findUnique({ where: { code: clean }, select: { id: true, isLocked: true } });
   if (!party) return NextResponse.json({ message: "مفيش بارتي بالكود ده." }, { status: 404 });
 
-  const user = await prisma.user.findUniqueOrThrow({ where: { email: sessionUser.email! } });
   const existing = await prisma.partyMember.findUnique({
     where: { partyId_userId: { partyId: party.id, userId: user.id } }
   });

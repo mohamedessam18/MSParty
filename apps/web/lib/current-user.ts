@@ -2,16 +2,20 @@ import { getServerSession } from "next-auth";
 import { authOptions } from "./auth";
 import { prisma } from "./prisma";
 
+/**
+ * Identity comes from the session's user id, not its email. Guests have no
+ * email at all, and the id is what every table actually keys on.
+ */
 export async function requireUser() {
   const session = await getServerSession(authOptions);
-  if (!session?.user?.email) throw new Error("UNAUTHORIZED");
-  return session.user;
+  const id = (session?.user as { id?: string } | undefined)?.id;
+  if (!id) throw new Error("UNAUTHORIZED");
+  return { id, ...session!.user };
 }
 
-/** The session carries an email; most routes need the actual row. */
 export async function requireDbUser() {
-  const sessionUser = await requireUser();
-  return prisma.user.findUniqueOrThrow({ where: { email: sessionUser.email! } });
+  const { id } = await requireUser();
+  return prisma.user.findUniqueOrThrow({ where: { id } });
 }
 
 /**
