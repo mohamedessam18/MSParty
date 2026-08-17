@@ -22,6 +22,8 @@ export type StageProps = {
   onUnmute: () => void;
   onYtError: (message: string | null) => void;
   onBuffering: (buffering: boolean) => void;
+  /** Fires once a player can accept a seek, so a queued join position lands. */
+  onPlayerReady: () => void;
   /** Rendered inside the stage, so it survives the fullscreen subtree. */
   overlay?: React.ReactNode;
 };
@@ -83,6 +85,7 @@ export function VideoStage(props: StageProps) {
             onWaiting={() => props.onBuffering(true)}
             onPlaying={() => props.onBuffering(false)}
             onCanPlay={() => props.onBuffering(false)}
+            onLoadedMetadata={props.onPlayerReady}
             onPlay={() => isHost && props.onControl("play", props.videoRef.current?.currentTime || 0)}
             onPause={() => isHost && props.onControl("pause", props.videoRef.current?.currentTime || 0)}
             onSeeked={() => isHost && props.onControl("seek", props.videoRef.current?.currentTime || 0)}
@@ -94,6 +97,7 @@ export function VideoStage(props: StageProps) {
               enabled={isHost}
               onReady={player => {
                 props.playerRef.current = player;
+                props.onPlayerReady();
               }}
               onControl={props.onControl}
               onError={props.onYtError}

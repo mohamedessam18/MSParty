@@ -44,6 +44,14 @@ export function PartyRoom({ party, userId }: { party: Party; userId: string }) {
   const rate = useRef(1);
   /** Set once the viewer clicks to unmute — the browser's price for audio. */
   const hasGesture = useRef(false);
+  /** Where to jump once a player finally reports ready. */
+  const pendingSeek = useRef<{ at: number; play: boolean } | null>(null);
+  /**
+   * Our own play/pause/seek makes the player emit its matching event, which
+   * would be relayed straight back out as a second control message. Ignore
+   * player-originated events briefly after we drive it ourselves.
+   */
+  const selfDriven = useRef(0);
 
   const [members, setMembers] = useState<Member[]>(() =>
     party.members.map(member => ({ ...member.user, role: member.role }))
@@ -64,7 +72,10 @@ export function PartyRoom({ party, userId }: { party: Party; userId: string }) {
 
   const [playing, setPlaying] = useState(party.isPlaying);
   const [isLocked, setIsLocked] = useState(party.isLocked);
-  const [waitForAll, setWaitForAll] = useState(true);
+  // Off by default: with it on, every single person joining mid-film paused the
+  // whole room while their player buffered. It is worth having, but only when
+  // the host deliberately asks for it.
+  const [waitForAll, setWaitForAll] = useState(false);
   const [connected, setConnected] = useState(false);
   const [muted, setMuted] = useState(false);
   const [tab, setTab] = useState<"chat" | "people" | "queue">("chat");
@@ -99,14 +110,30 @@ export function PartyRoom({ party, userId }: { party: Party; userId: string }) {
         setContentUrl(incomingUrl);
         setYtError(null);
       }
-      if (isHostRef.current) return;
+      // Only the join snapshot carries a role. The host ignores the running
+      // broadcast — it is the one producing it — but it MUST adopt the room's
+      // position when it first arrives. Without this, a host that reloads (or
+      // whose IFrame player got rebuilt) sits at 0 while the room is at 0:47,
+      // and its next play or pause broadcasts 0 and drags everyone to the start.
+      const isJoinSnapshot = !!incomingRole;
+      if (isHostRef.current && !isJoinSnapshot) return;
 
       const corrected = isPlaying ? timestamp + (Date.now() - serverTime) / 1000 : timestamp;
       const local = video.current ? video.current.currentTime || 0 : player.current?.currentTime() || 0;
       const drift = corrected - local;
 
+      // The player may not exist yet on a fresh join (the IFrame reports ready
+      // asynchronously). Remember where to land and let onReady apply it.
+      if (!video.current && !player.current) pendingSeek.current = { at: corrected, play: isPlaying };
+
       if (!isPlaying) {
         setRate(1);
+        // Paused rooms get no rate correction, so alignment has to happen here
+        // or a viewer stays frozen wherever they drifted to.
+        if (Math.abs(drift) > 0.5) {
+          if (video.current) video.current.currentTime = corrected;
+          player.current?.seekTo(corrected);
+        }
       } else if (Math.abs(drift) > HARD_SEEK) {
         setRate(1);
         if (video.current) video.current.currentTime = corrected;
@@ -279,8 +306,18 @@ export function PartyRoom({ party, userId }: { party: Party; userId: string }) {
     [emit]
   );
 
+  /** Relays what the host did to the player directly (native YouTube controls). */
+  const controlFromPlayer = useCallback(
+    (type: "play" | "pause" | "seek", timestamp: number) => {
+      if (Date.now() < selfDriven.current) return;
+      control(type, timestamp);
+    },
+    [control]
+  );
+
   const togglePlayback = useCallback(() => {
     const timestamp = player.current?.currentTime() || video.current?.currentTime || 0;
+    selfDriven.current = Date.now() + 700;
     if (playing) {
       player.current?.pause();
       video.current?.pause();
@@ -295,7 +332,10 @@ export function PartyRoom({ party, userId }: { party: Party; userId: string }) {
   // Hold the room for anyone still loading, then let it go again by itself.
   const autoPaused = useRef(false);
   useEffect(() => {
-    if (!isHost || !waitForAll) return;
+    if (!isHost || !waitForAll) {
+      autoPaused.current = false;
+      return;
+    }
     if (playing && stalled.length && !autoPaused.current) {
       autoPaused.current = true;
       togglePlayback();
@@ -305,12 +345,43 @@ export function PartyRoom({ party, userId }: { party: Party; userId: string }) {
     }
   }, [isHost, waitForAll, playing, stalled, togglePlayback]);
 
+  /**
+   * A host pressing play or pause takes ownership back from the auto-hold.
+   * Without clearing the latch, overriding a wait left it stuck on, and the
+   * next person to buffer would never pause the room.
+   */
+  const hostToggle = useCallback(() => {
+    autoPaused.current = false;
+    togglePlayback();
+  }, [togglePlayback]);
+
   function seek(seconds: number) {
     setCurrentTime(seconds);
+    selfDriven.current = Date.now() + 700;
     if (video.current) video.current.currentTime = seconds;
     player.current?.seekTo(seconds);
     control("seek", seconds);
   }
+
+  /**
+   * A join snapshot often lands before the IFrame player exists, so the seek it
+   * asked for is replayed here once the player reports ready.
+   */
+  const applyPendingSeek = useCallback(() => {
+    const target = pendingSeek.current;
+    pendingSeek.current = null;
+    if (!target) return;
+    selfDriven.current = Date.now() + 700;
+    if (video.current) video.current.currentTime = target.at;
+    player.current?.seekTo(target.at);
+    if (!target.play) return;
+    if (!isHostRef.current && !hasGesture.current) {
+      player.current?.mute(true);
+      setMuted(true);
+    }
+    player.current?.play();
+    video.current?.play().catch(() => undefined);
+  }, []);
 
   function unmute() {
     hasGesture.current = true;
@@ -405,9 +476,10 @@ export function PartyRoom({ party, userId }: { party: Party; userId: string }) {
             waitingFor={waitingFor}
             videoRef={video}
             playerRef={player}
-            onControl={control}
-            onTogglePlay={togglePlayback}
+            onControl={controlFromPlayer}
+            onTogglePlay={hostToggle}
             onSeek={seek}
+            onPlayerReady={applyPendingSeek}
             onUnmute={unmute}
             onYtError={setYtError}
             onBuffering={isBuffering => emit("viewer:buffering", { isBuffering })}
@@ -442,7 +514,7 @@ export function PartyRoom({ party, userId }: { party: Party; userId: string }) {
             waitForAll={waitForAll}
             stalled={stalled}
             requests={requests}
-            onTogglePlay={togglePlayback}
+            onTogglePlay={hostToggle}
             onRestart={() => seek(0)}
             onInvite={() => setInviteOpen(true)}
             onToggleLock={() => emit("party:lock", { isLocked: !isLocked })}
