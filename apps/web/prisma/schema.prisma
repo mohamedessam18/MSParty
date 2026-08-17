@@ -29,6 +29,7 @@ model Party {
   currentTimestamp Float @default(0)
   isPlaying Boolean @default(false)
   createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
   members PartyMember[]
   messages ChatMessage[]
   uploadedVideo UploadedVideo?

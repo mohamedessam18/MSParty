@@ -1,20 +1,19 @@
 {
   "name": "msparty",
   "private": true,
+  "packageManager": "pnpm@9.15.4",
   "scripts": {
-    "dev": "npm run dev --workspace=@msparty/web",
-    "dev:web": "npm run dev --workspace=@msparty/web",
-    "dev:sync": "npm run dev --workspace=@msparty/sync-server",
+    "dev": "pnpm --filter @msparty/web dev",
+    "dev:web": "pnpm --filter @msparty/web dev",
+    "dev:sync": "pnpm --filter @msparty/sync-server dev",
     "build": "prisma generate --schema apps/web/prisma/schema.prisma && pnpm --filter @msparty/sync-server build",
     "start": "pnpm --filter @msparty/sync-server start",
     "prisma:generate": "prisma generate --schema apps/web/prisma/schema.prisma",
     "prisma:migrate": "prisma migrate dev --schema apps/web/prisma/schema.prisma",
     "prisma:deploy": "prisma migrate deploy --schema apps/web/prisma/schema.prisma"
   },
-  "devDependencies": {
-    "prisma": "^5.18.0"
-  },
   "dependencies": {
-    "@prisma/client": "5.22.0"
+    "@prisma/client": "5.22.0",
+    "prisma": "^5.18.0"
   }
 }

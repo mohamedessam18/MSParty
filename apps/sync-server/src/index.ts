@@ -11,6 +11,7 @@ const secret = new TextEncoder().encode(process.env.SYNC_TOKEN_SECRET || process
 const origin = process.env.SYNC_SERVER_ORIGIN || "http://localhost:3000";
 const httpServer = createServer((request, response) => {
   cors({ origin })(request, response, () => {
+    if (request.url === "/health") { response.statusCode = 200; response.end("ok"); return; }
     response.statusCode = 404;
     response.end();
   });
