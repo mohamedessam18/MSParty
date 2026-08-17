@@ -2,6 +2,11 @@
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useState } from "react";
+import { Button } from "@/components/ui/button";
+import { Card, Kicker } from "@/components/ui/card";
+import { Field, FormError, Input } from "@/components/ui/input";
+import { Rule, Wordmark } from "@/components/ui/wordmark";
+
 export default function Register() {
   const router = useRouter();
   const [name, setName] = useState("");
@@ -39,31 +44,35 @@ export default function Register() {
   }
 
   return (
-    <main className="mx-auto flex min-h-screen max-w-md items-center px-5">
-      <section className="w-full rounded-[26px] border border-[#d4b7ff]/20 bg-[#131d35]/80 p-6 shadow-2xl shadow-black/20 sm:p-9">
-        <Link className="display text-xl font-bold" href="/">MS<span className="text-[#90e4ff]">Party</span></Link>
-        <h1 className="display mt-8 text-3xl font-semibold">اعمل مكان للسهرة.</h1>
-        <p className="mt-2 text-sm text-[#aab9d7]">ثلاث خانات، وبعدها تبقى جاهز تدعو صحابك.</p>
-        <form className="mt-7 space-y-4" onSubmit={submit}>
-          <label className="block text-sm text-[#cbd8f1]">
-            الاسم
-            <input required className="mt-2 w-full rounded-xl border border-white/10 bg-[#0d1629] px-4 py-3 text-white focus:border-[#d4b7ff] focus:outline-none" value={name} onChange={event => setName(event.target.value)} />
-          </label>
-          <label className="block text-sm text-[#cbd8f1]">
-            البريد الإلكتروني
-            <input required className="mt-2 w-full rounded-xl border border-white/10 bg-[#0d1629] px-4 py-3 text-white focus:border-[#d4b7ff] focus:outline-none" type="email" value={email} onChange={event => setEmail(event.target.value)} />
-          </label>
-          <label className="block text-sm text-[#cbd8f1]">
-            كلمة المرور (8 أحرف على الأقل)
-            <input required minLength={8} className="mt-2 w-full rounded-xl border border-white/10 bg-[#0d1629] px-4 py-3 text-white focus:border-[#d4b7ff] focus:outline-none" type="password" value={password} onChange={event => setPassword(event.target.value)} />
-          </label>
-          {error && <p className="rounded-xl bg-[#ff7b8d]/15 px-3 py-2 text-sm text-[#ffd6dd]">{error}</p>}
-          <button disabled={loading} className="w-full rounded-xl bg-[#d4b7ff] px-4 py-3 font-bold text-[#10172b] hover:bg-[#e5d4ff] disabled:opacity-60 transition">
+    <main className="mx-auto flex min-h-screen max-w-md flex-col justify-center px-5 py-10">
+      <Wordmark className="mb-8 self-start" />
+      <Card className="p-6 shadow-lift sm:p-8">
+        <Kicker>حساب جديد</Kicker>
+        <h1 className="display mt-2 text-3xl text-ivory">اعمل مكان للسهرة.</h1>
+        <Rule className="mt-4" />
+        <p className="mt-4 text-sm text-ivory-dim">ثلاث خانات، وبعدها تبقى جاهز تدعو صحابك.</p>
+        <form className="mt-6 space-y-4" onSubmit={submit}>
+          <Field label="الاسم">
+            <Input required value={name} onChange={event => setName(event.target.value)} />
+          </Field>
+          <Field label="البريد الإلكتروني">
+            <Input required type="email" dir="ltr" value={email} onChange={event => setEmail(event.target.value)} />
+          </Field>
+          <Field label="كلمة المرور" hint="8 أحرف على الأقل">
+            <Input required minLength={8} type="password" dir="ltr" value={password} onChange={event => setPassword(event.target.value)} />
+          </Field>
+          {error && <FormError>{error}</FormError>}
+          <Button size="lg" disabled={loading} className="w-full">
             {loading ? "جارٍ إنشاء الحساب..." : "اعمل حساب"}
-          </button>
+          </Button>
         </form>
-        <Link className="mt-5 block text-sm text-[#90e4ff] hover:underline" href="/login">عندك حساب؟ ادخل من هنا</Link>
-      </section>
+        <p className="mt-6 text-sm text-ivory-dim">
+          عندك حساب؟{" "}
+          <Link className="text-gold hover:underline" href="/login">
+            ادخل من هنا
+          </Link>
+        </p>
+      </Card>
     </main>
   );
 }

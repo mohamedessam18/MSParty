@@ -2,6 +2,10 @@
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useState } from "react";
+import { Button } from "@/components/ui/button";
+import { Card, Kicker } from "@/components/ui/card";
+import { Field, FormError, Input } from "@/components/ui/input";
+import { Rule, Wordmark } from "@/components/ui/wordmark";
 
 export default function CreateParty() {
   const router = useRouter();
@@ -11,127 +15,161 @@ export default function CreateParty() {
   const [file, setFile] = useState<File | null>(null);
   const [error, setError] = useState("");
   const [uploading, setUploading] = useState(false);
-  const [uploadProgress, setUploadProgress] = useState<number | null>(null);
+  const [progress, setProgress] = useState<number | null>(null);
   const [formatWarning, setFormatWarning] = useState<string | null>(null);
 
-  function handleFileChange(selectedFile: File | null) {
-    setFile(selectedFile);
-    setFormatWarning(null);
-    if (selectedFile) {
-      const ext = selectedFile.name.split(".").pop()?.toLowerCase();
-      if (ext === "mkv" || ext === "avi") {
-        setFormatWarning("ملاحظة: ملفات .mkv أو .avi قد لا تحتوي على أكواد مدعومة محلياً في جميع المتصفحات. يُفضّل استخدام صيغة MP4 (H.264).");
-      }
-    }
+  function handleFileChange(selected: File | null) {
+    setFile(selected);
+    const ext = selected?.name.split(".").pop()?.toLowerCase();
+    setFormatWarning(
+      ext === "mkv" || ext === "avi"
+        ? "ملفات .mkv و .avi غالبًا مش مدعومة في المتصفحات. يُفضّل MP4 بترميز H.264."
+        : null
+    );
   }
 
   async function submit(event: React.FormEvent) {
     event.preventDefault();
     setError("");
     setUploading(true);
-    setUploadProgress(null);
+    setProgress(null);
     try {
       let uploadedVideoId: string | undefined;
       let finalUrl = contentUrl;
+
       if (contentType === "upload") {
         if (!file) throw new Error("اختار فيديو لرفعه أولًا.");
-        const signed = await fetch("/api/uploads", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ fileName: file.name, contentType: file.type, fileSize: file.size }) });
-        if (!signed.ok) {
-          const errData = await signed.json().catch(() => ({}));
-          throw new Error(errData.message || "تعذر تجهيز رفع الفيديو. راجع إعدادات Cloudflare R2.");
-        }
-        const { uploadUrl, fileUrl, videoId } = await signed.json();
+        const signed = await fetch("/api/uploads", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ fileName: file.name, contentType: file.type, fileSize: file.size })
+        });
+        const signedData = await signed.json().catch(() => ({}));
+        if (!signed.ok) throw new Error(signedData.message || "تعذر تجهيز رفع الفيديو. راجع إعدادات Cloudflare R2.");
 
-        setUploadProgress(0);
+        setProgress(0);
         await new Promise<void>((resolve, reject) => {
           const xhr = new XMLHttpRequest();
-          xhr.open("PUT", uploadUrl);
+          xhr.open("PUT", signedData.uploadUrl);
           xhr.setRequestHeader("Content-Type", file.type || "video/mp4");
-          xhr.upload.onprogress = (evt) => {
-            if (evt.lengthComputable) {
-              const percent = Math.round((evt.loaded / evt.total) * 100);
-              setUploadProgress(percent);
-            }
-          };
-          xhr.onload = () => {
-            if (xhr.status >= 200 && xhr.status < 300) resolve();
-            else reject(new Error("رفع الفيديو لم يكتمل. جرّب مرة ثانية."));
-          };
+          xhr.upload.onprogress = event =>
+            event.lengthComputable && setProgress(Math.round((event.loaded / event.total) * 100));
+          xhr.onload = () =>
+            xhr.status >= 200 && xhr.status < 300
+              ? resolve()
+              : reject(new Error("رفع الفيديو لم يكتمل. جرّب مرة ثانية."));
           xhr.onerror = () => reject(new Error("حدث خطأ في الشبكة أثناء نقل الفيديو."));
           xhr.send(file);
         });
 
-        finalUrl = fileUrl;
-        uploadedVideoId = videoId;
+        finalUrl = signedData.fileUrl;
+        uploadedVideoId = signedData.videoId;
       }
-      const response = await fetch("/api/parties", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ name, contentType, contentUrl: finalUrl, uploadedVideoId }) });
-      if (!response.ok) throw new Error("مش قادرين نعمل البارتي دلوقتي. تأكد إنك مسجل دخول.");
-      router.push(`/party/${(await response.json()).id}`);
+
+      const response = await fetch("/api/parties", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ name, contentType, contentUrl: finalUrl, uploadedVideoId })
+      });
+      const data = await response.json().catch(() => ({}));
+      if (!response.ok) throw new Error(data.message || "مش قادرين نعمل البارتي دلوقتي. تأكد إنك مسجل دخول.");
+      router.push(`/party/${data.id}`);
     } catch (cause) {
       setError(cause instanceof Error ? cause.message : "حصلت مشكلة. جرّب تاني.");
-    } finally {
       setUploading(false);
-      setUploadProgress(null);
+      setProgress(null);
     }
   }
 
+  const modes = [
+    { value: "youtube" as const, icon: "▶", title: "YouTube", hint: "رابط جاهز للشلة" },
+    { value: "upload" as const, icon: "▣", title: "فيديو مرفوع", hint: "مؤقت ويُحذف تلقائيًا" }
+  ];
+
   return (
-    <main className="mx-auto min-h-screen max-w-2xl px-5 py-7">
+    <main className="mx-auto min-h-screen max-w-2xl px-5 py-6">
       <header className="flex items-center justify-between">
-        <Link className="display text-xl font-bold" href="/">MS<span className="text-[#90e4ff]">Party</span></Link>
-        <Link className="rounded-full border border-white/15 px-4 py-1.5 text-xs text-[#d6e4ff] hover:bg-white/5" href="/dashboard">← لوحة التحكم</Link>
+        <Wordmark />
+        <Link className="text-xs text-ivory-dim hover:text-ivory" href="/dashboard">
+          ← لوحة التحكم
+        </Link>
       </header>
+
       <section className="mt-10">
-        <p className="mono text-xs text-[#90e4ff]">HOST A NIGHT</p>
-        <h1 className="display mt-2 text-4xl font-semibold">افتح الشاشة للشلة.</h1>
-        <p className="mt-3 text-[#aab9d7]">اختار رابط YouTube أو ارفع فيديو مؤقت للبارتي فقط.</p>
-        <form onSubmit={submit} className="mt-8 space-y-6 rounded-[24px] border border-white/10 bg-[#131d35]/70 p-5 sm:p-7">
-          <label className="block text-sm text-[#cbd8f1]">اسم السهرة
-            <input required className="mt-2 w-full rounded-xl border border-white/10 bg-[#0d1629] px-4 py-3 text-white" placeholder="مثال: ليلة فيلم الجمعة" value={name} onChange={event => setName(event.target.value)} />
-          </label>
-          <fieldset>
-            <legend className="text-sm text-[#cbd8f1]">نوع العرض</legend>
-            <div className="mt-2 grid grid-cols-2 gap-3">
-              <button type="button" onClick={() => setContentType("youtube")} className={`rounded-2xl border p-4 text-right ${contentType === "youtube" ? "border-[#90e4ff] bg-[#90e4ff]/10" : "border-white/10"}`}>
-                <b>▶ YouTube</b>
-                <span className="mt-1 block text-xs text-[#aab9d7]">رابط جاهز للشلة</span>
-              </button>
-              <button type="button" onClick={() => setContentType("upload")} className={`rounded-2xl border p-4 text-right ${contentType === "upload" ? "border-[#d4b7ff] bg-[#d4b7ff]/10" : "border-white/10"}`}>
-                <b>▣ فيديو مرفوع</b>
-                <span className="mt-1 block text-xs text-[#aab9d7]">مؤقت ويحذف تلقائيًا</span>
-              </button>
-            </div>
-          </fieldset>
-          {contentType === "youtube" ? (
-            <label className="block text-sm text-[#cbd8f1]">رابط فيديو YouTube
-              <input required className="mt-2 w-full rounded-xl border border-white/10 bg-[#0d1629] px-4 py-3 text-white" placeholder="https://youtube.com/watch?v=…" dir="ltr" value={contentUrl} onChange={event => setContentUrl(event.target.value)} />
-            </label>
-          ) : (
-            <div className="space-y-3">
-              <label className="block rounded-2xl border border-dashed border-[#d4b7ff]/40 bg-[#d4b7ff]/5 p-5 text-sm text-[#e8dcff]">
-                اختار فيديو (حتى 2GB)
-                <input required type="file" accept="video/*" className="mt-3 block w-full text-sm" onChange={event => handleFileChange(event.target.files?.[0] || null)} />
-                <span className="mt-3 block text-xs leading-6 text-[#aab9d7]">يُحذف الفيديو بعد تغيير العرض بـ30 دقيقة، أو إذا لم تنشئ بارتي خلال ساعتين.</span>
-              </label>
-              {formatWarning && <p className="rounded-xl bg-[#fff6de]/10 border border-[#fff6de]/20 p-3 text-xs text-[#fff6de]">{formatWarning}</p>}
-            </div>
-          )}
-          {uploadProgress !== null && (
-            <div className="space-y-1.5">
-              <div className="flex justify-between text-xs text-[#90e4ff]">
-                <span>جارٍ رفع الفيديو للمغيمة...</span>
-                <span>{uploadProgress}%</span>
+        <Kicker>استضف ليلة</Kicker>
+        <h1 className="display mt-2 text-4xl text-ivory">افتح الشاشة للشلة.</h1>
+        <Rule className="mt-4 max-w-xs" />
+        <p className="mt-4 text-ivory-dim">اختار رابط YouTube أو ارفع فيديو مؤقت للبارتي.</p>
+
+        <Card className="mt-8 p-5 sm:p-7">
+          <form onSubmit={submit} className="space-y-6">
+            <Field label="اسم السهرة">
+              <Input required placeholder="مثال: ليلة فيلم الجمعة" value={name} onChange={event => setName(event.target.value)} />
+            </Field>
+
+            <fieldset>
+              <legend className="text-sm text-ivory-dim">نوع العرض</legend>
+              <div className="mt-2 grid grid-cols-2 gap-3">
+                {modes.map(mode => (
+                  <button
+                    key={mode.value}
+                    type="button"
+                    aria-pressed={contentType === mode.value}
+                    onClick={() => setContentType(mode.value)}
+                    className={`rounded-lg border p-4 text-right transition ${
+                      contentType === mode.value ? "border-gold bg-gold/10" : "border-velvet-hi hover:border-gold/40"
+                    }`}
+                  >
+                    <b className="block text-ivory">
+                      <span aria-hidden className="ml-1 text-gold">
+                        {mode.icon}
+                      </span>
+                      {mode.title}
+                    </b>
+                    <span className="mt-1 block text-xs text-ivory-dim">{mode.hint}</span>
+                  </button>
+                ))}
               </div>
-              <div className="h-2.5 w-full overflow-hidden rounded-full bg-[#0d1629]">
-                <div className="h-full bg-gradient-to-r from-[#90e4ff] to-[#d4b7ff] transition-all duration-200" style={{ width: `${uploadProgress}%` }} />
+            </fieldset>
+
+            {contentType === "youtube" ? (
+              <Field label="رابط فيديو YouTube">
+                <Input required dir="ltr" placeholder="https://youtube.com/watch?v=…" value={contentUrl} onChange={event => setContentUrl(event.target.value)} />
+              </Field>
+            ) : (
+              <div className="space-y-3">
+                <label className="block rounded-lg border border-dashed border-gold/35 bg-gold/5 p-5 text-sm text-ivory">
+                  اختار فيديو (حتى 2GB)
+                  <input required type="file" accept="video/*" className="mt-3 block w-full text-sm text-ivory-dim" onChange={event => handleFileChange(event.target.files?.[0] || null)} />
+                  <span className="mt-3 block text-xs leading-6 text-ivory-dim">
+                    يُحذف الفيديو بعد تغيير العرض بـ30 دقيقة، أو لو ما أنشأتش بارتي خلال ساعتين.
+                  </span>
+                </label>
+                {formatWarning && (
+                  <p className="rounded border border-gold/25 bg-gold/5 p-3 text-xs text-gold">{formatWarning}</p>
+                )}
               </div>
-            </div>
-          )}
-          {error && <p className="rounded-xl bg-[#ff7b8d]/15 px-3 py-2 text-sm text-[#ffd6dd]">{error}</p>}
-          <button disabled={uploading} className="rounded-full bg-[#90e4ff] px-6 py-3 font-bold text-[#10172b] disabled:opacity-60">
-            {uploading ? (uploadProgress !== null ? `جارٍ رفع الفيديو (${uploadProgress}%)...` : "جارٍ تجهيز البارتي...") : "افتح البارتي وخد كود الدعوة"}
-          </button>
-        </form>
+            )}
+
+            {progress !== null && (
+              <div className="space-y-1.5">
+                <div className="flex justify-between text-xs text-gold">
+                  <span>جارٍ رفع الفيديو...</span>
+                  <span className="mono">{progress}%</span>
+                </div>
+                <div className="h-2 w-full overflow-hidden rounded-full bg-ink-deep">
+                  <div className="h-full bg-gold transition-all duration-200" style={{ width: `${progress}%` }} />
+                </div>
+              </div>
+            )}
+
+            {error && <FormError>{error}</FormError>}
+
+            <Button size="lg" disabled={uploading} className="w-full">
+              {uploading ? (progress !== null ? `جارٍ الرفع (${progress}%)...` : "جارٍ تجهيز البارتي...") : "افتح البارتي وخد كود الدعوة"}
+            </Button>
+          </form>
+        </Card>
       </section>
     </main>
   );

@@ -2,4 +2,84 @@
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useState } from "react";
-export default function JoinPage() { const router = useRouter(); const [code, setCode] = useState(""); const [error, setError] = useState(""); function submit(event: React.FormEvent) { event.preventDefault(); const cleanCode = code.trim(); if (!cleanCode) return setError("اكتب كود البارتي اللي وصلك من الهوست."); router.push(`/party/${cleanCode}/join`); } return <main className="mx-auto flex min-h-screen max-w-md flex-col justify-center px-5 py-8"><header className="mb-6 flex items-center justify-between"><Link className="display text-xl font-bold" href="/">MS<span className="text-[#90e4ff]">Party</span></Link><Link className="rounded-full border border-white/15 px-4 py-1.5 text-xs text-[#d6e4ff] hover:bg-white/5" href="/dashboard">← لوحة التحكم</Link></header><section className="w-full rounded-[28px] border border-[#90e4ff]/20 bg-[#131d35]/80 p-7 shadow-2xl shadow-black/20"><p className="mono text-xs text-[#90e4ff]">JOIN THE ROOM</p><h1 className="display mt-2 text-3xl">مكانك محفوظ في السهرة.</h1><p className="mt-3 text-sm leading-7 text-[#aab9d7]">اكتب الكود اللي بعتّه الهوست. لو معاك رابط، افتحه مباشرة.</p><form className="mt-7" onSubmit={submit}><label className="text-sm text-[#cbd8f1]">كود البارتي<input autoFocus className="mono mt-2 w-full rounded-xl border border-white/10 bg-[#0d1629] px-4 py-4 text-left tracking-[.2em] text-white" dir="ltr" placeholder="ABC123" value={code} onChange={event => setCode(event.target.value)} /></label>{error && <p className="mt-3 rounded-xl bg-[#ff7b8d]/15 p-3 text-sm text-[#ffd6dd]">{error}</p>}<button className="mt-4 w-full rounded-xl bg-[#90e4ff] py-3 font-bold text-[#10172b]">ادخل البارتي</button></form><div className="mt-6 flex justify-between border-t border-white/10 pt-4 text-xs"><Link className="text-[#d4b7ff] hover:underline" href="/party/create">عايز تستضيف؟ أنشئ بارتي</Link><Link className="text-[#aab9d7] hover:text-white" href="/dashboard">بارتياتي</Link></div></section></main>; }
+import { Button } from "@/components/ui/button";
+import { Card, Kicker } from "@/components/ui/card";
+import { FormError } from "@/components/ui/input";
+import { Rule, Wordmark } from "@/components/ui/wordmark";
+
+export default function JoinPage() {
+  const router = useRouter();
+  const [code, setCode] = useState("");
+  const [error, setError] = useState("");
+  const [loading, setLoading] = useState(false);
+
+  async function submit(event: React.FormEvent) {
+    event.preventDefault();
+    setError("");
+    if (code.length < 6) return setError("الكود ٦ حروف. راجع اللي بعتهولك الهوست.");
+    setLoading(true);
+    try {
+      const response = await fetch("/api/parties/join-by-code", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ code })
+      });
+      const data = await response.json().catch(() => ({}));
+      if (!response.ok) throw new Error(data.message || "تعذر الدخول بالكود ده.");
+      router.replace(`/party/${data.id}`);
+    } catch (err: any) {
+      setError(err.message);
+      setLoading(false);
+    }
+  }
+
+  return (
+    <main className="mx-auto flex min-h-screen max-w-md flex-col justify-center px-5 py-10">
+      <div className="mb-8 flex items-center justify-between">
+        <Wordmark />
+        <Link className="text-xs text-ivory-dim hover:text-ivory" href="/dashboard">
+          ← بارتياتي
+        </Link>
+      </div>
+      <Card className="p-6 shadow-lift sm:p-8">
+        <Kicker>الدخول للصالة</Kicker>
+        <h1 className="display mt-2 text-3xl text-ivory">مكانك محفوظ.</h1>
+        <Rule className="mt-4" />
+        <p className="mt-4 text-sm leading-7 text-ivory-dim">
+          اكتب الكود اللي بعته الهوست. لو معاك رابط، افتحه وهتدخل على طول.
+        </p>
+        <form className="mt-6" onSubmit={submit}>
+          <label className="block text-sm text-ivory-dim" htmlFor="party-code">
+            كود البارتي
+          </label>
+          <input
+            id="party-code"
+            autoFocus
+            dir="ltr"
+            inputMode="text"
+            autoCapitalize="characters"
+            autoComplete="off"
+            maxLength={6}
+            placeholder="ABC234"
+            value={code}
+            // The stored codes exclude I/O/0/1, so anything else is a typo we
+            // simply drop as the user types rather than rejecting on submit.
+            onChange={event => setCode(event.target.value.toUpperCase().replace(/[^A-Z0-9]/g, "").slice(0, 6))}
+            className="mono mt-2 w-full rounded border border-velvet-hi bg-ink-deep px-4 py-4 text-center text-2xl tracking-[.4em] text-ivory placeholder:text-ivory-dim/40 focus:border-gold focus:outline-none"
+          />
+          {error && <div className="mt-3">
+            <FormError>{error}</FormError>
+          </div>}
+          <Button size="lg" disabled={loading} className="mt-4 w-full">
+            {loading ? "جارٍ الدخول..." : "ادخل البارتي"}
+          </Button>
+        </form>
+        <div className="mt-6 flex justify-between border-t border-velvet-hi pt-4 text-xs">
+          <Link className="text-gold hover:underline" href="/party/create">
+            عايز تستضيف؟ أنشئ بارتي
+          </Link>
+        </div>
+      </Card>
+    </main>
+  );
+}

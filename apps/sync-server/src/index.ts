@@ -9,6 +9,7 @@ import { Server, Socket } from "socket.io";
 const prisma = new PrismaClient();
 const secret = new TextEncoder().encode(process.env.SYNC_TOKEN_SECRET || process.env.NEXTAUTH_SECRET);
 const origin = process.env.SYNC_SERVER_ORIGIN || "http://localhost:3000";
+
 const httpServer = createServer((request, response) => {
   cors({ origin })(request, response, () => {
     if (request.url === "/health") { response.statusCode = 200; response.end("ok"); return; }
@@ -17,34 +18,62 @@ const httpServer = createServer((request, response) => {
   });
 });
 const io = new Server(httpServer, { cors: { origin, methods: ["GET", "POST"] } });
-const roomFor = (partyId: string) => `party:${partyId}`;
-type PartySocket = Socket & { userId?: string; userName?: string; partyId?: string; lastChatAt?: number };
 
-async function tokenUser(token: string) { const { payload } = await jwtVerify(token, secret); if (typeof payload.sub !== "string" || typeof payload.name !== "string") throw new Error("Invalid token"); return { id: payload.sub, name: payload.name }; }
-async function memberFor(socket: PartySocket, partyId: string) { return prisma.partyMember.findUnique({ where: { partyId_userId: { partyId, userId: socket.userId! } } }); }
-function emitState(partyId: string, party: { isPlaying: boolean; currentTimestamp: number; contentType?: string; contentUrl?: string | null }) { io.to(roomFor(partyId)).emit("sync:state", { isPlaying: party.isPlaying, timestamp: party.currentTimestamp, serverTime: Date.now(), ...(party.contentType ? { contentType: party.contentType, contentUrl: party.contentUrl } : {}) }); }
-async function control(socket: PartySocket, partyId: string, update: { isPlaying?: boolean; currentTimestamp?: number; contentType?: string; contentUrl?: string }) { const member = await memberFor(socket, partyId); if (member?.role !== "host") return socket.emit("error:unauthorized", { message: "Only host can control playback" }); const party = await prisma.party.update({ where: { id: partyId }, data: update }); emitState(partyId, party); }
-async function changeVideo(socket: PartySocket, partyId: string, contentType: string, contentUrl: string, uploadedVideoId?: string) {
-  const member = await memberFor(socket, partyId);
-  if (member?.role !== "host") return socket.emit("error:unauthorized", { message: "Only host can control playback" });
-  if (!["youtube", "upload"].includes(contentType) || !contentUrl) return socket.emit("error:unauthorized", { message: "Invalid video" });
-  try {
-    const party = await prisma.$transaction(async (transaction) => {
-      await transaction.uploadedVideo.updateMany({ where: { partyId }, data: { partyId: null, cleanupAt: new Date(Date.now() + 30 * 60 * 1000) } });
-      if (contentType === "upload") {
-        const attached = await transaction.uploadedVideo.updateMany({ where: { id: uploadedVideoId, uploaderId: socket.userId, partyId: null }, data: { partyId, cleanupAt: null } });
-        if (attached.count !== 1) throw new Error("Invalid upload");
-      }
-      return transaction.party.update({ where: { id: partyId }, data: { contentType, contentUrl, isPlaying: false, currentTimestamp: 0 } });
-    });
-    emitState(partyId, party);
-  } catch { socket.emit("error:unauthorized", { message: "Unable to change video" }); }
+const roomFor = (partyId: string) => `party:${partyId}`;
+const userRoom = (userId: string) => `user:${userId}`;
+
+type PartySocket = Socket & {
+  userId?: string;
+  userName?: string;
+  partyId?: string;
+  lastChatAt?: number;
+  lastReactionAt?: number;
+};
+
+/**
+ * How many live sockets each user has in each party. A person with two tabs
+ * open must not be announced twice, and closing one tab must not tell everyone
+ * they left.
+ */
+const presence = new Map<string, Map<string, number>>();
+
+function addPresence(partyId: string, userId: string) {
+  const party = presence.get(partyId) ?? new Map<string, number>();
+  presence.set(partyId, party);
+  const next = (party.get(userId) ?? 0) + 1;
+  party.set(userId, next);
+  return next === 1; // first connection for this user
 }
-async function cleanupExpiredUploads() {
-  if (!process.env.R2_ENDPOINT || !process.env.R2_ACCESS_KEY_ID || !process.env.R2_SECRET_ACCESS_KEY || !process.env.R2_BUCKET) return;
-  const expired = await prisma.uploadedVideo.findMany({ where: { cleanupAt: { lte: new Date() } }, take: 100 });
-  const r2 = new S3Client({ region: "auto", endpoint: process.env.R2_ENDPOINT, credentials: { accessKeyId: process.env.R2_ACCESS_KEY_ID, secretAccessKey: process.env.R2_SECRET_ACCESS_KEY } });
-  for (const video of expired) { try { await r2.send(new DeleteObjectCommand({ Bucket: process.env.R2_BUCKET, Key: video.storageKey })); await prisma.uploadedVideo.delete({ where: { id: video.id } }); } catch {} }
+
+function dropPresence(partyId: string, userId: string) {
+  const party = presence.get(partyId);
+  if (!party) return false;
+  const next = (party.get(userId) ?? 1) - 1;
+  if (next <= 0) {
+    party.delete(userId);
+    if (!party.size) presence.delete(partyId);
+    return true; // last connection closed
+  }
+  party.set(userId, next);
+  return false;
+}
+
+async function tokenUser(token: string) {
+  const { payload } = await jwtVerify(token, secret);
+  if (typeof payload.sub !== "string" || typeof payload.name !== "string") throw new Error("Invalid token");
+  return { id: payload.sub, name: payload.name };
+}
+
+const memberFor = (socket: PartySocket, partyId: string) =>
+  prisma.partyMember.findUnique({ where: { partyId_userId: { partyId, userId: socket.userId! } } });
+
+async function requireHost(socket: PartySocket, partyId: string) {
+  const member = await memberFor(socket, partyId);
+  if (member?.role !== "host") {
+    socket.emit("error:unauthorized", { message: "الهوست بس اللي يقدر يعمل ده" });
+    return false;
+  }
+  return true;
 }
 
 function getLiveTimestamp(party: { isPlaying: boolean; currentTimestamp: number; updatedAt: Date }) {
@@ -53,36 +82,368 @@ function getLiveTimestamp(party: { isPlaying: boolean; currentTimestamp: number;
   return Math.max(0, party.currentTimestamp + elapsed);
 }
 
-io.use(async (socket, next) => { try { const { userToken } = socket.handshake.auth as { userToken?: string }; if (!userToken) throw new Error("Missing user token"); const user = await tokenUser(userToken); (socket as PartySocket).userId = user.id; (socket as PartySocket).userName = user.name; next(); } catch { next(new Error("Unauthorized")); } });
-io.on("connection", (rawSocket) => {
-  const socket = rawSocket as PartySocket;
-  socket.on("join-party", async ({ partyId, userToken }: { partyId: string; userToken?: string }) => { try {
-    if (userToken) { const user = await tokenUser(userToken); if (user.id !== socket.userId) throw new Error("Identity mismatch"); }
-    const member = await memberFor(socket, partyId); const party = await prisma.party.findUnique({ where: { id: partyId } }); if (!member || !party) return socket.emit("error:unauthorized", { message: "Not a party member" });
-    const dbUser = await prisma.user.findUnique({ where: { id: socket.userId }, select: { avatarUrl: true } });
-    socket.join(roomFor(partyId)); socket.partyId = partyId;
-    const liveTime = getLiveTimestamp(party);
-    socket.emit("sync:state", { isPlaying: party.isPlaying, timestamp: liveTime, serverTime: Date.now(), contentType: party.contentType, contentUrl: party.contentUrl, role: member.role });
-    socket.to(roomFor(partyId)).emit("party:memberJoined", { userId: socket.userId, name: socket.userName, avatarUrl: dbUser?.avatarUrl });
-  } catch { socket.emit("error:unauthorized", { message: "Invalid party access" }); } });
-  socket.on("control:play", ({ partyId, timestamp }) => control(socket, partyId, { isPlaying: true, currentTimestamp: Number(timestamp) || 0 }));
-  socket.on("control:pause", ({ partyId, timestamp }) => control(socket, partyId, { isPlaying: false, currentTimestamp: Number(timestamp) || 0 }));
-  socket.on("control:seek", ({ partyId, timestamp }) => control(socket, partyId, { currentTimestamp: Number(timestamp) || 0 }));
-  socket.on("control:changeVideo", ({ partyId, contentType, contentUrl, uploadedVideoId }) => changeVideo(socket, partyId, contentType, contentUrl, uploadedVideoId));
-  socket.on("chat:send", async ({ partyId, message }) => { const clean = typeof message === "string" ? message.trim().slice(0, 1000) : ""; if (!clean) return; if ((socket.lastChatAt || 0) > Date.now() - 800) return; socket.lastChatAt = Date.now(); const member = await memberFor(socket, partyId); if (!member) return socket.emit("error:unauthorized", { message: "Not a party member" }); const saved = await prisma.chatMessage.create({ data: { partyId, userId: socket.userId!, message: clean } }); const dbUser = await prisma.user.findUnique({ where: { id: socket.userId }, select: { avatarUrl: true } }); io.to(roomFor(partyId)).emit("chat:message", { userId: socket.userId, name: socket.userName, avatarUrl: dbUser?.avatarUrl, message: clean, sentAt: saved.sentAt }); });
-  socket.on("disconnect", () => { if (socket.partyId) socket.to(roomFor(socket.partyId)).emit("party:memberLeft", { userId: socket.userId }); });
-});
-setInterval(async () => {
-  const partyIds = [...io.sockets.adapter.rooms.keys()].filter((key) => key.startsWith("party:"));
-  for (const room of partyIds) {
-    const partyId = room.slice(6);
-    const party = await prisma.party.findUnique({ where: { id: partyId } });
-    if (party) {
-      const liveTime = getLiveTimestamp(party);
-      io.to(room).emit("sync:heartbeat", { isPlaying: party.isPlaying, timestamp: liveTime, serverTime: Date.now() });
+function emitState(
+  partyId: string,
+  party: { isPlaying: boolean; currentTimestamp: number; contentType?: string; contentUrl?: string | null }
+) {
+  io.to(roomFor(partyId)).emit("sync:state", {
+    isPlaying: party.isPlaying,
+    timestamp: party.currentTimestamp,
+    serverTime: Date.now(),
+    ...(party.contentType ? { contentType: party.contentType, contentUrl: party.contentUrl } : {})
+  });
+}
+
+async function emitQueue(partyId: string) {
+  const items = await prisma.queueItem.findMany({
+    where: { partyId },
+    orderBy: [{ position: "asc" }],
+    include: { addedBy: { select: { id: true, name: true } }, _count: { select: { votes: true } } }
+  });
+  io.to(roomFor(partyId)).emit("queue:updated", {
+    items: items.map(item => ({
+      id: item.id,
+      title: item.title,
+      contentType: item.contentType,
+      contentUrl: item.contentUrl,
+      addedBy: item.addedBy,
+      votes: item._count.votes
+    }))
+  });
+}
+
+async function control(
+  socket: PartySocket,
+  partyId: string,
+  update: { isPlaying?: boolean; currentTimestamp?: number }
+) {
+  if (!(await requireHost(socket, partyId))) return;
+  const party = await prisma.party.update({ where: { id: partyId }, data: update });
+  emitState(partyId, party);
+}
+
+/** Detaches whatever was playing (scheduling its cleanup) and swaps in new content. */
+async function applyVideo(
+  partyId: string,
+  contentType: string,
+  contentUrl: string,
+  options: { uploadedVideoId?: string; uploaderId?: string } = {}
+) {
+  return prisma.$transaction(async transaction => {
+    await transaction.uploadedVideo.updateMany({
+      where: { partyId },
+      data: { partyId: null, cleanupAt: new Date(Date.now() + 30 * 60 * 1000) }
+    });
+    if (contentType === "upload") {
+      // Prisma drops `undefined` filters, so an absent id would match every
+      // unattached upload the user owns. Refuse rather than attach the wrong one.
+      if (!options.uploadedVideoId) throw new Error("Missing upload id");
+      const attached = await transaction.uploadedVideo.updateMany({
+        where: { id: options.uploadedVideoId, uploaderId: options.uploaderId, partyId: null },
+        data: { partyId, cleanupAt: null }
+      });
+      if (attached.count !== 1) throw new Error("Invalid upload");
     }
+    return transaction.party.update({
+      where: { id: partyId },
+      data: { contentType, contentUrl, isPlaying: false, currentTimestamp: 0 }
+    });
+  });
+}
+
+async function changeVideo(
+  socket: PartySocket,
+  partyId: string,
+  contentType: string,
+  contentUrl: string,
+  uploadedVideoId?: string
+) {
+  if (!(await requireHost(socket, partyId))) return;
+  if (!["youtube", "upload"].includes(contentType) || !contentUrl) {
+    return socket.emit("error:unauthorized", { message: "فيديو غير صالح" });
+  }
+  try {
+    const party = await applyVideo(partyId, contentType, contentUrl, { uploadedVideoId, uploaderId: socket.userId });
+    emitState(partyId, party);
+  } catch {
+    socket.emit("error:unauthorized", { message: "تعذر تغيير الفيديو" });
+  }
+}
+
+/** Moves the host role in the database — both a grant and a deliberate handover. */
+async function transferHost(partyId: string, fromUserId: string, toUserId: string) {
+  const target = await prisma.partyMember.findUnique({
+    where: { partyId_userId: { partyId, userId: toUserId } },
+    include: { user: { select: { name: true } } }
+  });
+  if (!target) throw new Error("Not a member");
+
+  await prisma.$transaction([
+    prisma.partyMember.update({ where: { partyId_userId: { partyId, userId: fromUserId } }, data: { role: "viewer" } }),
+    prisma.partyMember.update({ where: { partyId_userId: { partyId, userId: toUserId } }, data: { role: "host" } }),
+    prisma.party.update({ where: { id: partyId }, data: { hostId: toUserId } })
+  ]);
+
+  io.to(roomFor(partyId)).emit("party:hostChanged", { hostId: toUserId, name: target.user.name });
+}
+
+async function cleanupExpiredUploads() {
+  if (!process.env.R2_ENDPOINT || !process.env.R2_ACCESS_KEY_ID || !process.env.R2_SECRET_ACCESS_KEY || !process.env.R2_BUCKET) return;
+  const expired = await prisma.uploadedVideo.findMany({ where: { cleanupAt: { lte: new Date() } }, take: 100 });
+  if (!expired.length) return;
+  const r2 = new S3Client({
+    region: "auto",
+    endpoint: process.env.R2_ENDPOINT,
+    credentials: { accessKeyId: process.env.R2_ACCESS_KEY_ID, secretAccessKey: process.env.R2_SECRET_ACCESS_KEY }
+  });
+  for (const video of expired) {
+    try {
+      await r2.send(new DeleteObjectCommand({ Bucket: process.env.R2_BUCKET, Key: video.storageKey }));
+      await prisma.uploadedVideo.delete({ where: { id: video.id } });
+    } catch {}
+  }
+}
+
+io.use(async (socket, next) => {
+  try {
+    const { userToken } = socket.handshake.auth as { userToken?: string };
+    if (!userToken) throw new Error("Missing user token");
+    const user = await tokenUser(userToken);
+    (socket as PartySocket).userId = user.id;
+    (socket as PartySocket).userName = user.name;
+    next();
+  } catch {
+    next(new Error("Unauthorized"));
+  }
+});
+
+io.on("connection", rawSocket => {
+  const socket = rawSocket as PartySocket;
+  socket.join(userRoom(socket.userId!));
+
+  socket.on("join-party", async ({ partyId }: { partyId: string }) => {
+    try {
+      const member = await memberFor(socket, partyId);
+      const party = await prisma.party.findUnique({ where: { id: partyId } });
+      if (!member || !party) return socket.emit("error:unauthorized", { message: "مش عضو في البارتي ده" });
+
+      const dbUser = await prisma.user.findUnique({ where: { id: socket.userId }, select: { avatarUrl: true } });
+      socket.join(roomFor(partyId));
+      socket.partyId = partyId;
+
+      socket.emit("sync:state", {
+        isPlaying: party.isPlaying,
+        timestamp: getLiveTimestamp(party),
+        serverTime: Date.now(),
+        contentType: party.contentType,
+        contentUrl: party.contentUrl,
+        role: member.role,
+        isLocked: party.isLocked
+      });
+      await emitQueue(partyId);
+
+      if (addPresence(partyId, socket.userId!)) {
+        socket.to(roomFor(partyId)).emit("party:memberJoined", {
+          userId: socket.userId,
+          name: socket.userName,
+          avatarUrl: dbUser?.avatarUrl,
+          role: member.role
+        });
+      }
+    } catch {
+      socket.emit("error:unauthorized", { message: "تعذر الدخول للبارتي" });
+    }
+  });
+
+  socket.on("control:play", ({ partyId, timestamp }) =>
+    control(socket, partyId, { isPlaying: true, currentTimestamp: Number(timestamp) || 0 })
+  );
+  socket.on("control:pause", ({ partyId, timestamp }) =>
+    control(socket, partyId, { isPlaying: false, currentTimestamp: Number(timestamp) || 0 })
+  );
+  socket.on("control:seek", ({ partyId, timestamp }) =>
+    control(socket, partyId, { currentTimestamp: Number(timestamp) || 0 })
+  );
+  socket.on("control:changeVideo", ({ partyId, contentType, contentUrl, uploadedVideoId }) =>
+    changeVideo(socket, partyId, contentType, contentUrl, uploadedVideoId)
+  );
+
+  socket.on("chat:send", async ({ partyId, message }) => {
+    const clean = typeof message === "string" ? message.trim().slice(0, 1000) : "";
+    if (!clean) return;
+    if ((socket.lastChatAt || 0) > Date.now() - 800) return;
+    socket.lastChatAt = Date.now();
+    const member = await memberFor(socket, partyId);
+    if (!member) return socket.emit("error:unauthorized", { message: "مش عضو في البارتي ده" });
+    const saved = await prisma.chatMessage.create({ data: { partyId, userId: socket.userId!, message: clean } });
+    const dbUser = await prisma.user.findUnique({ where: { id: socket.userId }, select: { avatarUrl: true } });
+    io.to(roomFor(partyId)).emit("chat:message", {
+      userId: socket.userId,
+      name: socket.userName,
+      avatarUrl: dbUser?.avatarUrl,
+      message: clean,
+      sentAt: saved.sentAt
+    });
+  });
+
+  socket.on("chat:typing", async ({ partyId }) => {
+    if (socket.partyId !== partyId) return;
+    socket.to(roomFor(partyId)).emit("chat:typing", { userId: socket.userId, name: socket.userName });
+  });
+
+  // Reactions are ephemeral by design — broadcasting only, never persisted, so
+  // a busy room does not turn into a write storm.
+  socket.on("reaction:send", async ({ partyId, emoji }) => {
+    if (socket.partyId !== partyId) return;
+    if (!["😂", "😮", "❤️", "🔥", "👏", "😢"].includes(emoji)) return;
+    if ((socket.lastReactionAt || 0) > Date.now() - 500) return;
+    socket.lastReactionAt = Date.now();
+    io.to(roomFor(partyId)).emit("reaction:received", {
+      userId: socket.userId,
+      name: socket.userName,
+      emoji,
+      at: Date.now()
+    });
+  });
+
+  socket.on("queue:add", async ({ partyId, title, contentType, contentUrl }) => {
+    const member = await memberFor(socket, partyId);
+    if (!member) return;
+    // Queue is YouTube-only: uploads are deleted 30 minutes after they stop
+    // playing, so a queued upload would usually be gone by its turn.
+    if (contentType !== "youtube" || !contentUrl) {
+      return socket.emit("error:unauthorized", { message: "القائمة بتقبل روابط YouTube بس" });
+    }
+    const last = await prisma.queueItem.findFirst({ where: { partyId }, orderBy: { position: "desc" } });
+    await prisma.queueItem.create({
+      data: {
+        partyId,
+        addedById: socket.userId!,
+        title: String(title || contentUrl).trim().slice(0, 120),
+        contentType,
+        contentUrl,
+        position: (last?.position ?? 0) + 1
+      }
+    });
+    await emitQueue(partyId);
+  });
+
+  socket.on("queue:vote", async ({ partyId, itemId }) => {
+    const member = await memberFor(socket, partyId);
+    if (!member) return;
+    const item = await prisma.queueItem.findFirst({ where: { id: itemId, partyId } });
+    if (!item) return;
+    const existing = await prisma.queueVote.findUnique({
+      where: { queueItemId_userId: { queueItemId: itemId, userId: socket.userId! } }
+    });
+    // A second press takes the vote back.
+    if (existing) await prisma.queueVote.delete({ where: { id: existing.id } });
+    else await prisma.queueVote.create({ data: { queueItemId: itemId, userId: socket.userId! } });
+    await emitQueue(partyId);
+  });
+
+  socket.on("queue:remove", async ({ partyId, itemId }) => {
+    const member = await memberFor(socket, partyId);
+    if (!member) return;
+    const item = await prisma.queueItem.findFirst({ where: { id: itemId, partyId } });
+    if (!item) return;
+    if (item.addedById !== socket.userId && member.role !== "host") {
+      return socket.emit("error:unauthorized", { message: "مش من حقك تشيل الاقتراح ده" });
+    }
+    await prisma.queueItem.delete({ where: { id: item.id } });
+    await emitQueue(partyId);
+  });
+
+  socket.on("queue:playNext", async ({ partyId, itemId }) => {
+    if (!(await requireHost(socket, partyId))) return;
+    const next = itemId
+      ? await prisma.queueItem.findFirst({ where: { id: itemId, partyId } })
+      : await prisma.queueItem.findFirst({ where: { partyId }, orderBy: { position: "asc" } });
+    if (!next) return socket.emit("error:unauthorized", { message: "القائمة فاضية" });
+    try {
+      const party = await applyVideo(partyId, next.contentType, next.contentUrl);
+      await prisma.queueItem.delete({ where: { id: next.id } });
+      emitState(partyId, party);
+      await emitQueue(partyId);
+    } catch {
+      socket.emit("error:unauthorized", { message: "تعذر تشغيل الفيديو التالي" });
+    }
+  });
+
+  socket.on("control:request", async ({ partyId }) => {
+    const member = await memberFor(socket, partyId);
+    if (!member || member.role === "host") return;
+    const party = await prisma.party.findUnique({ where: { id: partyId }, select: { hostId: true } });
+    if (!party) return;
+    io.to(userRoom(party.hostId)).emit("control:requested", {
+      partyId,
+      userId: socket.userId,
+      name: socket.userName
+    });
+  });
+
+  socket.on("control:grant", async ({ partyId, userId }) => {
+    if (!(await requireHost(socket, partyId))) return;
+    try {
+      await transferHost(partyId, socket.userId!, userId);
+    } catch {
+      socket.emit("error:unauthorized", { message: "تعذر نقل التحكم" });
+    }
+  });
+
+  socket.on("control:deny", async ({ partyId, userId }) => {
+    if (!(await requireHost(socket, partyId))) return;
+    io.to(userRoom(userId)).emit("control:denied", { partyId });
+  });
+
+  socket.on("host:transfer", async ({ partyId, userId }) => {
+    if (!(await requireHost(socket, partyId))) return;
+    try {
+      await transferHost(partyId, socket.userId!, userId);
+    } catch {
+      socket.emit("error:unauthorized", { message: "تعذر نقل الاستضافة" });
+    }
+  });
+
+  socket.on("member:kick", async ({ partyId, userId }) => {
+    if (!(await requireHost(socket, partyId))) return;
+    if (userId === socket.userId) return;
+    await prisma.partyMember.deleteMany({ where: { partyId, userId } });
+    io.to(userRoom(userId)).emit("party:kicked", { partyId });
+    io.to(roomFor(partyId)).emit("party:memberLeft", { userId });
+    presence.get(partyId)?.delete(userId);
+    // Pull every tab that user has open out of the room.
+    for (const client of await io.in(userRoom(userId)).fetchSockets()) client.leave(roomFor(partyId));
+  });
+
+  socket.on("party:lock", async ({ partyId, isLocked }) => {
+    if (!(await requireHost(socket, partyId))) return;
+    await prisma.party.update({ where: { id: partyId }, data: { isLocked: !!isLocked } });
+    io.to(roomFor(partyId)).emit("party:lockChanged", { isLocked: !!isLocked });
+  });
+
+  socket.on("disconnect", () => {
+    if (!socket.partyId || !socket.userId) return;
+    if (dropPresence(socket.partyId, socket.userId)) {
+      socket.to(roomFor(socket.partyId)).emit("party:memberLeft", { userId: socket.userId });
+    }
+  });
+});
+
+setInterval(async () => {
+  const rooms = [...io.sockets.adapter.rooms.keys()].filter(key => key.startsWith("party:"));
+  for (const room of rooms) {
+    const party = await prisma.party.findUnique({ where: { id: room.slice(6) } });
+    if (!party) continue;
+    io.to(room).emit("sync:heartbeat", {
+      isPlaying: party.isPlaying,
+      timestamp: getLiveTimestamp(party),
+      serverTime: Date.now()
+    });
   }
 }, 5000);
+
 setInterval(() => { cleanupExpiredUploads().catch(() => undefined); }, 5 * 60 * 1000);
 cleanupExpiredUploads().catch(() => undefined);
+
 httpServer.listen(Number(process.env.PORT || 4000), () => console.log("MSParty sync server listening"));

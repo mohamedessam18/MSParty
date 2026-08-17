@@ -1,7 +1,16 @@
 "use client";
 import { useEffect, useRef } from "react";
 declare global { interface Window { YT: any; onYouTubeIframeAPIReady: () => void; } }
-export type PlayerHandle = { seekTo: (seconds: number) => void; play: () => void; pause: () => void; currentTime: () => number };
+export type PlayerHandle = {
+  seekTo: (seconds: number) => void;
+  play: () => void;
+  pause: () => void;
+  currentTime: () => number;
+  /** 0 until the video's metadata has loaded. */
+  duration: () => number;
+  setVolume: (percent: number) => void;
+  mute: (muted: boolean) => void;
+};
 export function YouTubePlayer({ videoId, enabled, onReady, onControl, onError }: { videoId: string; enabled: boolean; onReady: (player: PlayerHandle) => void; onControl: (type: "play" | "pause" | "seek", timestamp: number) => void; onError?: (errorMsg: string) => void }) {
   const containerRef = useRef<HTMLDivElement>(null);
   const playerRef = useRef<any>();
@@ -69,6 +78,22 @@ export function YouTubePlayer({ videoId, enabled, onReady, onControl, onError }:
                     return playerInstance.getCurrentTime();
                   }
                   return 0;
+                },
+                duration: () => {
+                  if (playerInstance && typeof playerInstance.getDuration === "function") {
+                    return playerInstance.getDuration() || 0;
+                  }
+                  return 0;
+                },
+                setVolume: percent => {
+                  if (playerInstance && typeof playerInstance.setVolume === "function") {
+                    playerInstance.setVolume(Math.max(0, Math.min(100, percent)));
+                  }
+                },
+                mute: muted => {
+                  if (!playerInstance) return;
+                  if (muted && typeof playerInstance.mute === "function") playerInstance.mute();
+                  if (!muted && typeof playerInstance.unMute === "function") playerInstance.unMute();
                 }
               });
             },

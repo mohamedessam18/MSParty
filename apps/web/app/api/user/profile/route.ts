@@ -27,7 +27,15 @@ export async function PATCH(request: Request) {
       dataToUpdate.name = name.trim().slice(0, 50);
     }
     if (avatarUrl !== undefined) {
-      dataToUpdate.avatarUrl = typeof avatarUrl === "string" ? avatarUrl : null;
+      // Reject data: URIs outright. A failed upload used to fall back to an
+      // inline base64 image, which put megabytes into this column and then
+      // re-sent them with every chat message.
+      const isStorableUrl =
+        typeof avatarUrl === "string" && /^https?:\/\//.test(avatarUrl) && avatarUrl.length <= 512;
+      if (avatarUrl !== null && !isStorableUrl) {
+        return NextResponse.json({ message: "رابط الصورة غير صالح." }, { status: 400 });
+      }
+      dataToUpdate.avatarUrl = isStorableUrl ? avatarUrl : null;
     }
 
     const updatedUser = await prisma.user.update({

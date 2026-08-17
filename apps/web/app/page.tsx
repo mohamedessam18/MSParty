@@ -1,9 +1,120 @@
 import Link from "next/link";
+import { Button } from "@/components/ui/button";
+import { Kicker } from "@/components/ui/card";
+import { Rule, Wordmark } from "@/components/ui/wordmark";
 
 const steps = [
-  ["01", "الهوست يفتح السهرة", "يختار فيديو YouTube، ويأخذ مكانه قدام الشاشة."],
-  ["02", "صحابك يدخلوا", "بكود صغير أو رابط — كل واحد يظهر في صف المقاعد."],
-  ["03", "تتفرجوا في نفس اللحظة", "الهوست بس يتحكم، والباقي يعيشوا الفيلم سوا."]
+  { number: "01", title: "الهوست يفتح السهرة", copy: "يختار فيديو YouTube أو يرفع واحد، وياخد مكانه قدام الشاشة." },
+  { number: "02", title: "صحابك يدخلوا", copy: "بكود من ٦ حروف أو برابط — كل واحد يظهر في صف المقاعد." },
+  { number: "03", title: "تتفرجوا في نفس اللحظة", copy: "الهوست بس اللي يتحكم، والباقي يعيشوا الفيلم سوا." }
 ];
 
-export default function Home() { return <main className="min-h-screen overflow-hidden"><header className="mx-auto flex max-w-7xl items-center justify-between px-5 py-6 sm:px-8"><span className="display text-xl font-bold">MS<span className="text-[#90e4ff]">Party</span></span><nav className="flex items-center gap-4 text-sm"><Link className="text-[#d6e4ff] hover:text-[#90e4ff]" href="/join">ادخل بكود</Link><Link className="rounded-full border border-[#90e4ff]/35 px-4 py-2 text-[#90e4ff] hover:bg-[#90e4ff]/10" href="/login">تسجيل الدخول</Link></nav></header><section className="mx-auto grid max-w-7xl items-center gap-12 px-5 pb-20 pt-10 sm:px-8 lg:min-h-[650px] lg:grid-cols-[1.05fr_.95fr]"><div><div className="inline-flex items-center gap-2 rounded-full border border-[#d4b7ff]/25 bg-[#d4b7ff]/10 px-3 py-2 text-xs text-[#e8dcff]"><span className="now-pulse h-2 w-2 rounded-full bg-[#ff7b8d]" /> السينما بتاعتكم، حتى لو بعيدين</div><h1 className="display mt-6 max-w-3xl text-5xl font-bold leading-[1.24] sm:text-6xl">مشاهدة واحدة.<br /><span className="text-[#90e4ff]">شلة كاملة.</span></h1><p className="mt-6 max-w-xl text-lg leading-8 text-[#b9c8e8]">MSParty يخلي كل واحد فيكم قدام شاشته، بس كأنكم قاعدين في نفس الصف. الهوست يقود العرض، وأنتم تعيشوا كل لحظة مع بعض.</p><div className="mt-8 flex flex-wrap gap-3"><Link className="rounded-full bg-[#90e4ff] px-6 py-3 font-bold text-[#10172b] transition hover:bg-[#cff4ff]" href="/party/create">أنشئ بارتي</Link><Link className="rounded-full border border-white/15 px-6 py-3 text-[#f4f7ff] transition hover:bg-white/5" href="/join">انضمام بكود</Link></div><p className="mt-4 text-xs text-[#8091b4]">عندك رابط؟ افتحه وادخل مباشرة.</p></div><div className="glow-orbit mx-auto w-full max-w-xl rounded-[28px] bg-[#0a1020] p-3"><div className="relative aspect-video overflow-hidden rounded-[21px] bg-[radial-gradient(circle_at_50%_0%,#365182,transparent_56%),linear-gradient(135deg,#18294b,#090e1c)]"><div className="absolute inset-x-0 top-0 flex items-center justify-between p-4 text-xs"><span className="rounded-full bg-[#10172b]/80 px-3 py-2 text-[#90e4ff]">ليلة فيلم الجمعة</span><span className="mono rounded-full bg-[#ff7b8d]/20 px-3 py-2 text-[#ffd6dd]">LIVE · 04</span></div><div className="absolute inset-0 flex items-center justify-center"><div className="flex h-20 w-20 items-center justify-center rounded-full border border-[#90e4ff]/40 bg-[#90e4ff]/15 text-3xl text-[#90e4ff] shadow-[0_0_60px_rgba(144,228,255,.24)]">▶</div></div><div className="absolute inset-x-0 bottom-0 h-28 bg-gradient-to-t from-[#070d1b] to-transparent" /></div><div className="relative -mt-5 flex justify-around px-4"><span className="rounded-full border-2 border-[#0a1020] bg-[#fff6de] px-3 py-2 text-xs font-bold text-[#10172b]">أنت · Host</span><span className="rounded-full border-2 border-[#0a1020] bg-[#d4b7ff] px-3 py-2 text-xs font-bold text-[#10172b]">سارة</span><span className="rounded-full border-2 border-[#0a1020] bg-[#90e4ff] px-3 py-2 text-xs font-bold text-[#10172b]">عمر</span></div></div></section><section className="border-y border-white/10 bg-[#0c1324]/65"><div className="mx-auto max-w-7xl px-5 py-16 sm:px-8"><p className="mono text-xs text-[#90e4ff]">HOW IT FEELS</p><h2 className="display mt-2 text-3xl">ثلاث خطوات، ومفيش حد برا المشهد.</h2><div className="mt-8 grid gap-4 md:grid-cols-3">{steps.map(([number, title, copy]) => <article className="rounded-[22px] bg-[#131d35] p-5" key={number}><span className="mono text-xs text-[#90e4ff]">{number}</span><h3 className="display mt-6 text-lg">{title}</h3><p className="mt-2 leading-7 text-sm text-[#aab9d7]">{copy}</p></article>)}</div></div></section></main>; }
+function Header() {
+  return (
+    <header className="mx-auto flex max-w-6xl items-center justify-between px-5 py-6">
+      <Wordmark />
+      <nav className="flex items-center gap-2 sm:gap-3">
+        <Link href="/join" className="px-2 text-sm text-ivory-dim transition hover:text-ivory">
+          ادخل بكود
+        </Link>
+        <Link href="/login">
+          <Button variant="ghost" size="sm">
+            تسجيل الدخول
+          </Button>
+        </Link>
+      </nav>
+    </header>
+  );
+}
+
+function ScreenPreview() {
+  return (
+    <div className="marquee-frame mx-auto w-full max-w-lg">
+      <div className="relative aspect-video overflow-hidden border border-gold/25 bg-gradient-to-b from-velvet to-ink-deep">
+        <div className="absolute inset-x-0 top-0 flex items-center justify-between p-3 text-xs">
+          <span className="rounded border border-gold/25 bg-ink/70 px-2.5 py-1.5 text-gold">ليلة فيلم الجمعة</span>
+          <span className="mono flex items-center gap-1.5 rounded bg-curtain/20 px-2.5 py-1.5 text-curtain">
+            <i className="animate-soft-pulse h-1.5 w-1.5 rounded-full bg-curtain" />
+            LIVE · 04
+          </span>
+        </div>
+        <div className="absolute inset-0 flex items-center justify-center">
+          <span className="flex h-16 w-16 items-center justify-center rounded-full border border-gold/40 bg-gold/10 text-2xl text-gold">
+            ▶
+          </span>
+        </div>
+      </div>
+      {/* The seat row: the whole point of the product, shown as the poster's subject. */}
+      <div className="-mt-4 flex justify-center gap-2 px-4">
+        {[
+          { label: "أنت · Host", tone: "bg-gold text-ink" },
+          { label: "سارة", tone: "bg-ivory text-ink" },
+          { label: "عمر", tone: "bg-velvet-hi text-ivory" }
+        ].map(seat => (
+          <span key={seat.label} className={`rounded border-2 border-ink px-2.5 py-1.5 text-xs font-bold ${seat.tone}`}>
+            {seat.label}
+          </span>
+        ))}
+      </div>
+    </div>
+  );
+}
+
+export default function Home() {
+  return (
+    <main className="min-h-screen">
+      <Header />
+
+      <section className="mx-auto grid max-w-6xl items-center gap-12 px-5 pb-16 pt-6 lg:grid-cols-[1.05fr_.95fr] lg:pt-12">
+        <div>
+          <div className="inline-flex items-center gap-2 rounded border border-gold/25 bg-gold/5 px-3 py-1.5 text-xs text-gold">
+            <span className="animate-soft-pulse h-1.5 w-1.5 rounded-full bg-curtain" />
+            السينما بتاعتكم، حتى لو بعيدين
+          </div>
+          <h1 className="display mt-6 text-5xl leading-tight text-ivory sm:text-6xl">
+            مشاهدة واحدة.
+            <br />
+            <span className="text-gold">شلة كاملة.</span>
+          </h1>
+          <Rule className="mt-6 max-w-sm" />
+          <p className="mt-6 max-w-xl text-lg leading-8 text-ivory-dim">
+            MSParty يخلي كل واحد فيكم قدام شاشته، بس كأنكم قاعدين في نفس الصف. الهوست يقود العرض، وأنتم تعيشوا كل لحظة مع بعض.
+          </p>
+          <div className="mt-8 flex flex-wrap gap-3">
+            <Link href="/party/create">
+              <Button size="lg">أنشئ بارتي</Button>
+            </Link>
+            <Link href="/join">
+              <Button variant="ghost" size="lg">
+                انضمام بكود
+              </Button>
+            </Link>
+          </div>
+          <p className="mt-4 text-xs text-ivory-dim/70">عندك رابط؟ افتحه وادخل مباشرة.</p>
+        </div>
+
+        <ScreenPreview />
+      </section>
+
+      <section className="border-t border-velvet-hi bg-ink-deep/50">
+        <div className="mx-auto max-w-6xl px-5 py-16">
+          <Kicker>إزاي بيحصل</Kicker>
+          <h2 className="display mt-2 text-3xl text-ivory">ثلاث خطوات، ومفيش حد برا المشهد.</h2>
+          <div className="mt-8 grid gap-4 md:grid-cols-3">
+            {steps.map(step => (
+              <article key={step.number} className="rounded-lg border border-velvet-hi bg-velvet/60 p-5">
+                <span className="mono text-xs tracking-[.2em] text-gold">{step.number}</span>
+                <h3 className="display mt-4 text-lg text-ivory">{step.title}</h3>
+                <p className="mt-2 text-sm leading-7 text-ivory-dim">{step.copy}</p>
+              </article>
+            ))}
+          </div>
+        </div>
+      </section>
+
+      <footer className="mx-auto max-w-6xl px-5 py-10 text-center text-xs text-ivory-dim/60">
+        MSParty — اتفرجوا سوا
+      </footer>
+    </main>
+  );
+}

@@ -1,5 +1,36 @@
 import { NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
-import { requireUser } from "@/lib/current-user";
-export async function GET(_: Request, { params }: { params: { id: string } }) { try { await requireUser(); const party = await prisma.party.findUnique({ where: { id: params.id }, include: { host: { select: { name: true } }, members: { include: { user: { select: { id: true, name: true } } } } } }); return party ? NextResponse.json(party) : NextResponse.json({ message: "Not found" }, { status: 404 }); } catch { return NextResponse.json({ message: "Unauthorized" }, { status: 401 }); } }
-export async function DELETE(_: Request, { params }: { params: { id: string } }) { try { const user = await requireUser(); const party = await prisma.party.findUnique({ where: { id: params.id } }); if (!party || party.hostId !== (await prisma.user.findUnique({ where: { email: user.email! } }))?.id) return NextResponse.json({ message: "Forbidden" }, { status: 403 }); await prisma.party.delete({ where: { id: params.id } }); return new NextResponse(null, { status: 204 }); } catch { return NextResponse.json({ message: "Unauthorized" }, { status: 401 }); } }
+import { requireDbUser, requireMembership } from "@/lib/current-user";
+
+export async function GET(_: Request, { params }: { params: { id: string } }) {
+  try {
+    await requireMembership(params.id);
+  } catch (error) {
+    const forbidden = error instanceof Error && error.message === "FORBIDDEN";
+    return NextResponse.json(
+      { message: forbidden ? "Forbidden" : "Unauthorized" },
+      { status: forbidden ? 403 : 401 }
+    );
+  }
+
+  const party = await prisma.party.findUnique({
+    where: { id: params.id },
+    include: {
+      host: { select: { name: true } },
+      members: { include: { user: { select: { id: true, name: true, avatarUrl: true } } } }
+    }
+  });
+  return party ? NextResponse.json(party) : NextResponse.json({ message: "Not found" }, { status: 404 });
+}
+
+export async function DELETE(_: Request, { params }: { params: { id: string } }) {
+  try {
+    const user = await requireDbUser();
+    const party = await prisma.party.findUnique({ where: { id: params.id }, select: { hostId: true } });
+    if (!party || party.hostId !== user.id) return NextResponse.json({ message: "Forbidden" }, { status: 403 });
+    await prisma.party.delete({ where: { id: params.id } });
+    return new NextResponse(null, { status: 204 });
+  } catch {
+    return NextResponse.json({ message: "Unauthorized" }, { status: 401 });
+  }
+}
