@@ -42,6 +42,8 @@ export function PartyRoom({ party, userId }: { party: Party; userId: string }) {
   const player = useRef<PlayerHandle>();
   const video = useRef<HTMLVideoElement | null>(null);
   const rate = useRef(1);
+  /** Set once the viewer clicks to unmute — the browser's price for audio. */
+  const hasGesture = useRef(false);
 
   const [members, setMembers] = useState<Member[]>(() =>
     party.members.map(member => ({ ...member.user, role: member.role }))
@@ -131,8 +133,18 @@ export function PartyRoom({ party, userId }: { party: Party; userId: string }) {
         }
       }
       if (player.current) {
-        if (isPlaying) player.current.play();
-        else player.current.pause();
+        if (isPlaying) {
+          // The IFrame player gives us no failure signal, so we cannot retry the
+          // way the <video> path does. Stay muted until the viewer clicks the
+          // unmute button — that click is the gesture that earns us sound.
+          if (!hasGesture.current) {
+            player.current.mute(true);
+            setMuted(true);
+          }
+          player.current.play();
+        } else {
+          player.current.pause();
+        }
       }
     },
     [setRate]
@@ -301,6 +313,7 @@ export function PartyRoom({ party, userId }: { party: Party; userId: string }) {
   }
 
   function unmute() {
+    hasGesture.current = true;
     setMuted(false);
     if (video.current) {
       video.current.muted = false;

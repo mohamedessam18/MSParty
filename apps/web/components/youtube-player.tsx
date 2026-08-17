@@ -56,6 +56,10 @@ export function YouTubePlayer({ videoId, enabled, onReady, onControl, onError, o
             iv_load_policy: 3,
             playsinline: 1,
             autoplay: 1,
+            // Viewers start muted so the browser lets us autoplay at all.
+            // Unmuted autoplay without a user gesture is blocked, and playVideo()
+            // fails silently when it is — which left viewers on a frozen frame.
+            mute: enabled ? 0 : 1,
           },
           events: {
             onReady: () => {

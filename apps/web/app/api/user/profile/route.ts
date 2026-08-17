@@ -2,6 +2,9 @@ import { NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
 import { requireUser } from "@/lib/current-user";
 
+// Per-user response; never let it sit in a shared cache.
+export const dynamic = "force-dynamic";
+
 export async function GET() {
   try {
     const sessionUser = await requireUser();

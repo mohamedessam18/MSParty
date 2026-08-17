@@ -1,13 +1,26 @@
 "use client";
 import Link from "next/link";
 import { signIn } from "next-auth/react";
-import { useState } from "react";
+import { useSearchParams } from "next/navigation";
+import { Suspense, useState } from "react";
 import { Button } from "@/components/ui/button";
 import { Card, Kicker } from "@/components/ui/card";
 import { Field, FormError, Input } from "@/components/ui/input";
 import { Rule, Wordmark } from "@/components/ui/wordmark";
 
-export default function Login() {
+export default function LoginPage() {
+  return (
+    <Suspense>
+      <Login />
+    </Suspense>
+  );
+}
+
+function Login() {
+  const params = useSearchParams();
+  // Set when a join link bounced the user here to switch accounts, so they land
+  // back on the invite instead of the generic dashboard.
+  const next = params.get("next");
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [error, setError] = useState("");
@@ -29,7 +42,9 @@ export default function Login() {
         setError("بيانات الدخول غير صحيحة. تحقق من البريد وكلمة المرور.");
         setLoading(false);
       } else {
-        window.location.href = "/dashboard";
+        // Only ever follow a same-origin path, so a crafted ?next= cannot
+        // bounce someone off the site straight after they authenticate.
+        window.location.href = next?.startsWith("/") && !next.startsWith("//") ? next : "/dashboard";
       }
     } catch {
       setError("تعذر تسجيل الدخول. حاول مرة أخرى.");
