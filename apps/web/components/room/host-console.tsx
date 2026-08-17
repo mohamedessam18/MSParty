@@ -8,22 +8,28 @@ import { ControlRequest } from "./types";
 export function HostConsole({
   playing,
   isLocked,
+  waitForAll,
+  stalled,
   requests,
   onTogglePlay,
   onRestart,
   onInvite,
   onToggleLock,
+  onToggleWaitForAll,
   onChangeVideo,
   onGrant,
   onDeny
 }: {
   playing: boolean;
   isLocked: boolean;
+  waitForAll: boolean;
+  stalled: { userId: string; name: string }[];
   requests: ControlRequest[];
   onTogglePlay: () => void;
   onRestart: () => void;
   onInvite: () => void;
   onToggleLock: () => void;
+  onToggleWaitForAll: () => void;
   onChangeVideo: (input: { url: string; file: File | null }) => Promise<void>;
   onGrant: (userId: string) => void;
   onDeny: (userId: string) => void;
@@ -68,8 +74,24 @@ export function HostConsole({
           <Button size="sm" variant={isLocked ? "danger" : "ghost"} onClick={onToggleLock}>
             {isLocked ? "🔒 مقفول" : "🔓 مفتوح"}
           </Button>
+          <Button
+            size="sm"
+            variant={waitForAll ? "primary" : "ghost"}
+            onClick={onToggleWaitForAll}
+            aria-pressed={waitForAll}
+            title="يوقف العرض تلقائيًا لو حد لسه بيحمّل"
+          >
+            {waitForAll ? "⏳ بيستنى الكل" : "⏩ مش بيستنى"}
+          </Button>
         </div>
       </div>
+
+      {!!stalled.length && (
+        <p className="mt-3 rounded border border-curtain/30 bg-curtain/10 px-3 py-2 text-sm text-curtain">
+          لسه بيحمّلوا: <b>{stalled.map(item => item.name).join("، ")}</b>
+          {waitForAll && " — العرض متوقف لحد ما يجهزوا."}
+        </p>
+      )}
 
       {requests.map(request => (
         <div

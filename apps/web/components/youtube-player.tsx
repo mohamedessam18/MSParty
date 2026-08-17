@@ -10,19 +10,23 @@ export type PlayerHandle = {
   duration: () => number;
   setVolume: (percent: number) => void;
   mute: (muted: boolean) => void;
+  /** Used to drift back into sync gradually instead of seeking. */
+  setRate: (rate: number) => void;
 };
-export function YouTubePlayer({ videoId, enabled, onReady, onControl, onError }: { videoId: string; enabled: boolean; onReady: (player: PlayerHandle) => void; onControl: (type: "play" | "pause" | "seek", timestamp: number) => void; onError?: (errorMsg: string) => void }) {
+export function YouTubePlayer({ videoId, enabled, onReady, onControl, onError, onBuffering }: { videoId: string; enabled: boolean; onReady: (player: PlayerHandle) => void; onControl: (type: "play" | "pause" | "seek", timestamp: number) => void; onError?: (errorMsg: string) => void; onBuffering?: (buffering: boolean) => void }) {
   const containerRef = useRef<HTMLDivElement>(null);
   const playerRef = useRef<any>();
   const onReadyRef = useRef(onReady);
   const onControlRef = useRef(onControl);
   const onErrorRef = useRef(onError);
+  const onBufferingRef = useRef(onBuffering);
 
   useEffect(() => {
     onReadyRef.current = onReady;
     onControlRef.current = onControl;
     onErrorRef.current = onError;
-  }, [onReady, onControl, onError]);
+    onBufferingRef.current = onBuffering;
+  }, [onReady, onControl, onError, onBuffering]);
 
   useEffect(() => {
     if (!videoId) return;
@@ -94,6 +98,11 @@ export function YouTubePlayer({ videoId, enabled, onReady, onControl, onError }:
                   if (!playerInstance) return;
                   if (muted && typeof playerInstance.mute === "function") playerInstance.mute();
                   if (!muted && typeof playerInstance.unMute === "function") playerInstance.unMute();
+                },
+                setRate: rate => {
+                  if (playerInstance && typeof playerInstance.setPlaybackRate === "function") {
+                    playerInstance.setPlaybackRate(rate);
+                  }
                 }
               });
             },
@@ -107,7 +116,12 @@ export function YouTubePlayer({ videoId, enabled, onReady, onControl, onError }:
               onErrorRef.current?.(errorMsg);
             },
             onStateChange: (event: any) => {
-              if (cancelled || !enabled) return;
+              if (cancelled) return;
+              // Buffering is reported for everyone, not just the host — the
+              // room needs to know who is still loading.
+              if (event.data === window.YT.PlayerState.BUFFERING) onBufferingRef.current?.(true);
+              if (event.data === window.YT.PlayerState.PLAYING) onBufferingRef.current?.(false);
+              if (!enabled) return;
               if (event.data === window.YT.PlayerState.PLAYING) {
                 if (playerInstance && typeof playerInstance.getCurrentTime === "function") {
                   onControlRef.current("play", playerInstance.getCurrentTime());

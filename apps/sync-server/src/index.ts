@@ -21,6 +21,7 @@ const io = new Server(httpServer, { cors: { origin, methods: ["GET", "POST"] } }
 
 const roomFor = (partyId: string) => `party:${partyId}`;
 const userRoom = (userId: string) => `user:${userId}`;
+const voiceRoom = (partyId: string) => `voice:${partyId}`;
 
 type PartySocket = Socket & {
   userId?: string;
@@ -56,6 +57,26 @@ function dropPresence(partyId: string, userId: string) {
   }
   party.set(userId, next);
   return false;
+}
+
+/** Who in each party is still loading video, so the room can wait for them. */
+const buffering = new Map<string, Map<string, string>>();
+
+function publishReadiness(partyId: string) {
+  const stalled = buffering.get(partyId);
+  io.to(roomFor(partyId)).emit("party:readiness", {
+    buffering: stalled ? [...stalled.entries()].map(([userId, name]) => ({ userId, name })) : []
+  });
+}
+
+function setBuffering(partyId: string, userId: string, name: string, isBuffering: boolean) {
+  const party = buffering.get(partyId) ?? new Map<string, string>();
+  buffering.set(partyId, party);
+  const had = party.has(userId);
+  if (isBuffering) party.set(userId, name);
+  else party.delete(userId);
+  if (!party.size) buffering.delete(partyId);
+  if (had !== isBuffering) publishReadiness(partyId);
 }
 
 async function tokenUser(token: string) {
@@ -422,8 +443,50 @@ io.on("connection", rawSocket => {
     io.to(roomFor(partyId)).emit("party:lockChanged", { isLocked: !!isLocked });
   });
 
+  socket.on("viewer:buffering", ({ partyId, isBuffering }) => {
+    if (socket.partyId !== partyId) return;
+    setBuffering(partyId, socket.userId!, socket.userName || "", !!isBuffering);
+  });
+
+  // --- Voice chat signalling -------------------------------------------------
+  // The server only relays; audio travels peer to peer. Peers are keyed by
+  // socket id rather than user id so two tabs never collapse into one peer.
+  socket.on("voice:join", async ({ partyId }) => {
+    const member = await memberFor(socket, partyId);
+    if (!member) return;
+    const peers = (await io.in(voiceRoom(partyId)).fetchSockets()).map(client => ({
+      socketId: client.id,
+      userId: (client.data as any).userId,
+      name: (client.data as any).userName
+    }));
+    socket.data.userId = socket.userId;
+    socket.data.userName = socket.userName;
+    socket.join(voiceRoom(partyId));
+    socket.emit("voice:peers", { peers });
+    socket.to(voiceRoom(partyId)).emit("voice:peerJoined", {
+      socketId: socket.id,
+      userId: socket.userId,
+      name: socket.userName
+    });
+  });
+
+  socket.on("voice:leave", ({ partyId }) => {
+    socket.leave(voiceRoom(partyId));
+    socket.to(voiceRoom(partyId)).emit("voice:peerLeft", { socketId: socket.id });
+  });
+
+  socket.on("voice:signal", ({ toSocketId, data }) => {
+    io.to(toSocketId).emit("voice:signal", { fromSocketId: socket.id, data });
+  });
+
+  socket.on("voice:speaking", ({ partyId, speaking }) => {
+    socket.to(roomFor(partyId)).emit("voice:speaking", { userId: socket.userId, speaking: !!speaking });
+  });
+
   socket.on("disconnect", () => {
     if (!socket.partyId || !socket.userId) return;
+    socket.to(voiceRoom(socket.partyId)).emit("voice:peerLeft", { socketId: socket.id });
+    setBuffering(socket.partyId, socket.userId, socket.userName || "", false);
     if (dropPresence(socket.partyId, socket.userId)) {
       socket.to(roomFor(socket.partyId)).emit("party:memberLeft", { userId: socket.userId });
     }

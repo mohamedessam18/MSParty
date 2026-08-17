@@ -6,14 +6,14 @@ import { formatTime, videoId } from "./types";
 export type StageProps = {
   contentType: string;
   contentUrl: string;
-  extractedStreamUrl: string | null;
-  extracting: boolean;
   isHost: boolean;
   playing: boolean;
   ytError: string | null;
   currentTime: number;
   duration: number;
   muted: boolean;
+  /** Non-null while the room is holding playback for someone still loading. */
+  waitingFor: string | null;
   videoRef: React.MutableRefObject<HTMLVideoElement | null>;
   playerRef: React.MutableRefObject<PlayerHandle | undefined>;
   onControl: (type: "play" | "pause" | "seek", timestamp: number) => void;
@@ -21,10 +21,13 @@ export type StageProps = {
   onSeek: (seconds: number) => void;
   onUnmute: () => void;
   onYtError: (message: string | null) => void;
+  onBuffering: (buffering: boolean) => void;
+  /** Rendered inside the stage, so it survives the fullscreen subtree. */
+  overlay?: React.ReactNode;
 };
 
 export function VideoStage(props: StageProps) {
-  const { contentType, contentUrl, extractedStreamUrl, extracting, isHost, playing, ytError, muted } = props;
+  const { contentType, contentUrl, isHost, playing, ytError, muted, waitingFor } = props;
   const shell = useRef<HTMLDivElement>(null);
   const [volume, setVolume] = useState(100);
   const [fullscreen, setFullscreen] = useState(false);
@@ -53,8 +56,7 @@ export function VideoStage(props: StageProps) {
     else shell.current?.requestFullscreen().catch(() => undefined);
   }
 
-  const usesVideoElement = contentType !== "youtube" || !!extractedStreamUrl;
-  const source = contentType === "youtube" ? extractedStreamUrl! : contentUrl;
+  const isUpload = contentType !== "youtube";
 
   return (
     <div className="marquee-frame">
@@ -65,32 +67,28 @@ export function VideoStage(props: StageProps) {
               ⚠️
             </span>
             <p className="mt-2 text-base font-bold text-curtain">{ytError}</p>
-            <p className="mt-1 text-xs text-ivory-dim">
-              الهوست يقدر يغيّر الرابط لفيديو تاني أو يرفع فيديو خاص.
-            </p>
+            <p className="mt-1 text-xs text-ivory-dim">الهوست يقدر يغيّر الرابط لفيديو تاني أو يرفع فيديو خاص.</p>
           </div>
         )}
 
-        {usesVideoElement ? (
+        {isUpload ? (
           <video
             ref={props.videoRef}
-            src={source}
+            src={contentUrl}
             autoPlay
             playsInline
             preload="auto"
             controls={false}
             className="pointer-events-none aspect-video w-full select-none bg-black object-contain"
+            onWaiting={() => props.onBuffering(true)}
+            onPlaying={() => props.onBuffering(false)}
+            onCanPlay={() => props.onBuffering(false)}
             onPlay={() => isHost && props.onControl("play", props.videoRef.current?.currentTime || 0)}
             onPause={() => isHost && props.onControl("pause", props.videoRef.current?.currentTime || 0)}
             onSeeked={() => isHost && props.onControl("seek", props.videoRef.current?.currentTime || 0)}
           />
         ) : (
           <div className="relative aspect-video w-full">
-            {extracting && (
-              <div className="absolute inset-0 z-20 flex items-center justify-center bg-ink-deep/70 text-xs text-gold">
-                <span className="animate-soft-pulse">جارٍ تجهيز الستريم...</span>
-              </div>
-            )}
             <YouTubePlayer
               videoId={videoId(contentUrl)}
               enabled={isHost}
@@ -99,19 +97,34 @@ export function VideoStage(props: StageProps) {
               }}
               onControl={props.onControl}
               onError={props.onYtError}
+              onBuffering={props.onBuffering}
             />
             {/* Viewers must not be able to drive the embedded player itself. */}
             {!isHost && <div className="absolute inset-0 z-10" onClick={event => event.preventDefault()} />}
           </div>
         )}
 
-        {muted && (
+        {waitingFor && (
+          <div className="absolute inset-x-0 top-4 z-20 mx-auto w-max rounded border border-gold/40 bg-ink/90 px-4 py-2 text-xs text-gold">
+            <span className="animate-soft-pulse">⏳ مستنيين {waitingFor}</span>
+          </div>
+        )}
+
+        {muted && !waitingFor && (
           <button
             onClick={props.onUnmute}
             className="absolute inset-x-0 top-4 z-20 mx-auto w-max rounded border border-gold/50 bg-ink/90 px-4 py-2 text-xs font-bold text-gold shadow-lift hover:bg-gold hover:text-ink"
           >
             🔊 اضغط لتشغيل الصوت
           </button>
+        )}
+
+        {/* Only mounted in fullscreen: outside it, the page's own panels are
+            visible and a second copy would just duplicate them. */}
+        {fullscreen && props.overlay && (
+          <div className="pointer-events-none absolute inset-y-0 left-0 z-30 flex w-full max-w-sm flex-col justify-end p-3">
+            <div className="pointer-events-auto">{props.overlay}</div>
+          </div>
         )}
 
         <div className="absolute inset-x-0 bottom-0 z-20 bg-gradient-to-t from-ink-deep via-ink-deep/70 to-transparent px-3 pb-3 pt-10 sm:px-4">
@@ -124,16 +137,10 @@ export function VideoStage(props: StageProps) {
               >
                 {playing ? "❚❚" : "▶"}
               </button>
-              <button
-                onClick={() => props.onSeek(Math.max(0, props.currentTime - 10))}
-                className="rounded border border-velvet-hi px-2 py-1 text-xs text-ivory hover:bg-velvet-hi"
-              >
+              <button onClick={() => props.onSeek(Math.max(0, props.currentTime - 10))} className="rounded border border-velvet-hi px-2 py-1 text-xs text-ivory hover:bg-velvet-hi">
                 -10s
               </button>
-              <button
-                onClick={() => props.onSeek(props.currentTime + 10)}
-                className="rounded border border-velvet-hi px-2 py-1 text-xs text-ivory hover:bg-velvet-hi"
-              >
+              <button onClick={() => props.onSeek(props.currentTime + 10)} className="rounded border border-velvet-hi px-2 py-1 text-xs text-ivory hover:bg-velvet-hi">
                 +10s
               </button>
               <input

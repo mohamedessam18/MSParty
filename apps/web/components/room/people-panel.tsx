@@ -7,12 +7,16 @@ export function PeoplePanel({
   members,
   userId,
   isHost,
+  stalledIds = [],
+  speakingIds = [],
   onTransfer,
   onKick
 }: {
   members: Member[];
   userId: string;
   isHost: boolean;
+  stalledIds?: string[];
+  speakingIds?: string[];
   onTransfer: (userId: string) => void;
   onKick: (userId: string) => void;
 }) {
@@ -23,7 +27,11 @@ export function PeoplePanel({
         return (
           <div key={member.id} className="flex items-center gap-3 rounded-lg bg-velvet-hi/50 p-3">
             <Avatar name={member.name} src={member.avatarUrl} />
-            <span className="min-w-0 flex-1 truncate text-sm text-ivory">{isSelf ? "أنت" : member.name}</span>
+            <span className="min-w-0 flex-1 truncate text-sm text-ivory">
+              {isSelf ? "أنت" : member.name}
+              {stalledIds.includes(member.id) && <span className="mr-1.5 text-xs text-curtain">· بيحمّل</span>}
+              {speakingIds.includes(member.id) && <span className="mr-1.5 text-xs text-gold">· 🔊</span>}
+            </span>
             <span
               className={`mono shrink-0 rounded px-2 py-1 text-[10px] tracking-wider ${
                 member.role === "host" ? "bg-gold text-ink" : "bg-ink text-ivory-dim"

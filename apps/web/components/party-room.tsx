@@ -13,7 +13,10 @@ import { MemberSeats } from "./room/member-seats";
 import { PeoplePanel } from "./room/people-panel";
 import { QueuePanel } from "./room/queue-panel";
 import { ReactionBar, ReactionLayer } from "./room/reaction-layer";
+import { StageOverlay } from "./room/stage-overlay";
+import { useVoice } from "./room/use-voice";
 import { VideoStage } from "./room/video-stage";
+import { VoiceBar } from "./room/voice-bar";
 import type { ControlRequest, FlyingReaction, Member, Message, QueueItem } from "./room/types";
 
 type Party = {
@@ -28,11 +31,17 @@ type Party = {
   members: { role: string; user: { id: string; name: string; avatarUrl?: string | null } }[];
 };
 
+/** Drift thresholds, in seconds. */
+const HARD_SEEK = 5; // beyond this, catching up gradually would take too long
+const NUDGE = 0.35; // beyond this, lean on playback rate
+const SETTLED = 0.15; // inside this, run at normal speed
+
 export function PartyRoom({ party, userId }: { party: Party; userId: string }) {
   const router = useRouter();
   const socket = useRef<Socket>();
   const player = useRef<PlayerHandle>();
   const video = useRef<HTMLVideoElement | null>(null);
+  const rate = useRef(1);
 
   const [members, setMembers] = useState<Member[]>(() =>
     party.members.map(member => ({ ...member.user, role: member.role }))
@@ -49,9 +58,11 @@ export function PartyRoom({ party, userId }: { party: Party; userId: string }) {
   const [reactions, setReactions] = useState<FlyingReaction[]>([]);
   const [typing, setTyping] = useState<{ name: string; at: number }[]>([]);
   const [requests, setRequests] = useState<ControlRequest[]>([]);
+  const [stalled, setStalled] = useState<{ userId: string; name: string }[]>([]);
 
   const [playing, setPlaying] = useState(party.isPlaying);
   const [isLocked, setIsLocked] = useState(party.isLocked);
+  const [waitForAll, setWaitForAll] = useState(true);
   const [connected, setConnected] = useState(false);
   const [muted, setMuted] = useState(false);
   const [tab, setTab] = useState<"chat" | "people" | "queue">("chat");
@@ -62,23 +73,22 @@ export function PartyRoom({ party, userId }: { party: Party; userId: string }) {
   const [contentType, setContentType] = useState(party.contentType);
   const [contentUrl, setContentUrl] = useState(party.contentUrl || "");
   const [ytError, setYtError] = useState<string | null>(null);
-  const [extractedStreamUrl, setExtractedStreamUrl] = useState<string | null>(null);
-  const [extracting, setExtracting] = useState(false);
   const [currentTime, setCurrentTime] = useState(0);
   const [duration, setDuration] = useState(0);
 
+  const voice = useVoice(socket, party.id, connected);
   const hostName = members.find(member => member.role === "host")?.name || "الهوست";
 
+  /** Nudges playback speed toward the host's position instead of jumping. */
+  const setRate = useCallback((next: number) => {
+    if (rate.current === next) return;
+    rate.current = next;
+    if (video.current) video.current.playbackRate = next;
+    player.current?.setRate(next);
+  }, []);
+
   const applyState = useCallback(
-    ({
-      isPlaying,
-      timestamp,
-      serverTime,
-      contentType: incomingType,
-      contentUrl: incomingUrl,
-      role: incomingRole,
-      isLocked: incomingLock
-    }: any) => {
+    ({ isPlaying, timestamp, serverTime, contentType: incomingType, contentUrl: incomingUrl, role: incomingRole, isLocked: incomingLock }: any) => {
       setPlaying(isPlaying);
       if (incomingRole) setRole(incomingRole);
       if (typeof incomingLock === "boolean") setIsLocked(incomingLock);
@@ -90,8 +100,23 @@ export function PartyRoom({ party, userId }: { party: Party; userId: string }) {
       if (isHostRef.current) return;
 
       const corrected = isPlaying ? timestamp + (Date.now() - serverTime) / 1000 : timestamp;
+      const local = video.current ? video.current.currentTime || 0 : player.current?.currentTime() || 0;
+      const drift = corrected - local;
+
+      if (!isPlaying) {
+        setRate(1);
+      } else if (Math.abs(drift) > HARD_SEEK) {
+        setRate(1);
+        if (video.current) video.current.currentTime = corrected;
+        player.current?.seekTo(corrected);
+      } else if (Math.abs(drift) > NUDGE) {
+        // Behind the host: run slightly fast. Ahead: run slightly slow.
+        setRate(drift > 0 ? 1.05 : 0.95);
+      } else if (Math.abs(drift) < SETTLED) {
+        setRate(1);
+      }
+
       if (video.current) {
-        if (Math.abs((video.current.currentTime || 0) - corrected) > 1.5) video.current.currentTime = corrected;
         if (isPlaying) {
           video.current.play().catch(() => {
             // Browsers block unmuted autoplay until the user interacts. Fall back
@@ -106,12 +131,11 @@ export function PartyRoom({ party, userId }: { party: Party; userId: string }) {
         }
       }
       if (player.current) {
-        if (Math.abs((player.current.currentTime() || 0) - corrected) > 1.5) player.current.seekTo(corrected);
         if (isPlaying) player.current.play();
         else player.current.pause();
       }
     },
-    []
+    [setRate]
   );
 
   useEffect(() => {
@@ -161,6 +185,9 @@ export function PartyRoom({ party, userId }: { party: Party; userId: string }) {
         });
         client.on("party:lockChanged", ({ isLocked: locked }: { isLocked: boolean }) => setIsLocked(locked));
         client.on("party:kicked", () => router.replace("/dashboard"));
+        client.on("party:readiness", ({ buffering }: { buffering: { userId: string; name: string }[] }) =>
+          setStalled(buffering)
+        );
 
         client.on("queue:updated", ({ items }: { items: QueueItem[] }) => setQueue(items));
         client.on("reaction:received", ({ emoji, name }: { emoji: string; name: string }) => {
@@ -211,27 +238,6 @@ export function PartyRoom({ party, userId }: { party: Party; userId: string }) {
     return () => clearTimeout(timer);
   }, [notice]);
 
-  useEffect(() => {
-    if (contentType !== "youtube" || !contentUrl) {
-      setExtractedStreamUrl(null);
-      return;
-    }
-    let active = true;
-    setExtracting(true);
-    fetch("/api/youtube-extract", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ url: contentUrl })
-    })
-      .then(response => (response.ok ? response.json() : null))
-      .then(data => active && data?.streamUrl && setExtractedStreamUrl(data.streamUrl))
-      .catch(() => undefined)
-      .finally(() => active && setExtracting(false));
-    return () => {
-      active = false;
-    };
-  }, [contentType, contentUrl]);
-
   // Poll both players so the host scrubber has a real range. The IFrame path
   // previously reported no duration at all, pinning the slider's max at 100.
   useEffect(() => {
@@ -247,9 +253,12 @@ export function PartyRoom({ party, userId }: { party: Party; userId: string }) {
     return () => clearInterval(timer);
   }, []);
 
-  const emit = useCallback((event: string, payload: object = {}) => {
-    socket.current?.emit(event, { partyId: party.id, ...payload });
-  }, [party.id]);
+  const emit = useCallback(
+    (event: string, payload: object = {}) => {
+      socket.current?.emit(event, { partyId: party.id, ...payload });
+    },
+    [party.id]
+  );
 
   const control = useCallback(
     (type: "play" | "pause" | "seek", timestamp: number) => {
@@ -258,7 +267,7 @@ export function PartyRoom({ party, userId }: { party: Party; userId: string }) {
     [emit]
   );
 
-  function togglePlayback() {
+  const togglePlayback = useCallback(() => {
     const timestamp = player.current?.currentTime() || video.current?.currentTime || 0;
     if (playing) {
       player.current?.pause();
@@ -269,7 +278,20 @@ export function PartyRoom({ party, userId }: { party: Party; userId: string }) {
       video.current?.play().catch(() => undefined);
       control("play", timestamp);
     }
-  }
+  }, [playing, control]);
+
+  // Hold the room for anyone still loading, then let it go again by itself.
+  const autoPaused = useRef(false);
+  useEffect(() => {
+    if (!isHost || !waitForAll) return;
+    if (playing && stalled.length && !autoPaused.current) {
+      autoPaused.current = true;
+      togglePlayback();
+    } else if (!playing && !stalled.length && autoPaused.current) {
+      autoPaused.current = false;
+      togglePlayback();
+    }
+  }, [isHost, waitForAll, playing, stalled, togglePlayback]);
 
   function seek(seconds: number) {
     setCurrentTime(seconds);
@@ -290,6 +312,7 @@ export function PartyRoom({ party, userId }: { party: Party; userId: string }) {
   }
 
   const typingNames = useMemo(() => typing.map(item => item.name), [typing]);
+  const waitingFor = waitForAll && stalled.length ? stalled.map(item => item.name).join("، ") : null;
 
   async function changeVideo({ url, file }: { url: string; file: File | null }) {
     let nextUrl = url;
@@ -308,8 +331,7 @@ export function PartyRoom({ party, userId }: { party: Party; userId: string }) {
         const xhr = new XMLHttpRequest();
         xhr.open("PUT", data.uploadUrl);
         xhr.setRequestHeader("Content-Type", file.type || "video/mp4");
-        xhr.onload = () =>
-          xhr.status >= 200 && xhr.status < 300 ? resolve() : reject(new Error("رفع الفيديو لم يكتمل."));
+        xhr.onload = () => (xhr.status >= 200 && xhr.status < 300 ? resolve() : reject(new Error("رفع الفيديو لم يكتمل.")));
         xhr.onerror = () => reject(new Error("خطأ في الشبكة أثناء الرفع."));
         xhr.send(file);
       });
@@ -321,6 +343,9 @@ export function PartyRoom({ party, userId }: { party: Party; userId: string }) {
     if (!nextUrl) throw new Error("اكتب رابط أو اختار ملف.");
     emit("control:changeVideo", { contentType: file ? "upload" : "youtube", contentUrl: nextUrl, uploadedVideoId });
   }
+
+  const sendMessage = (message: string) => emit("chat:send", { message });
+  const react = (emoji: string) => emit("reaction:send", { emoji });
 
   return (
     <main className="min-h-screen px-4 py-4 sm:px-6">
@@ -358,14 +383,13 @@ export function PartyRoom({ party, userId }: { party: Party; userId: string }) {
           <VideoStage
             contentType={contentType}
             contentUrl={contentUrl}
-            extractedStreamUrl={extractedStreamUrl}
-            extracting={extracting}
             isHost={isHost}
             playing={playing}
             ytError={ytError}
             currentTime={currentTime}
             duration={duration}
             muted={muted}
+            waitingFor={waitingFor}
             videoRef={video}
             playerRef={player}
             onControl={control}
@@ -373,6 +397,8 @@ export function PartyRoom({ party, userId }: { party: Party; userId: string }) {
             onSeek={seek}
             onUnmute={unmute}
             onYtError={setYtError}
+            onBuffering={isBuffering => emit("viewer:buffering", { isBuffering })}
+            overlay={<StageOverlay messages={messages} onSend={sendMessage} onReact={react} />}
           />
           <ReactionLayer reactions={reactions} />
         </div>
@@ -381,17 +407,33 @@ export function PartyRoom({ party, userId }: { party: Party; userId: string }) {
           {playing ? `${hostName} يشغّل الآن` : isHost ? "الفيديو جاهز — شغّله لما تكونوا مستعدين" : `${hostName} لم يبدأ التشغيل بعد`}
         </p>
 
-        <MemberSeats members={members} userId={userId} />
+        <MemberSeats members={members} userId={userId} stalledIds={stalled.map(item => item.userId)} />
+
+        <div className="mt-6">
+          <VoiceBar
+            joined={voice.joined}
+            micMuted={voice.micMuted}
+            peers={voice.peers}
+            speakingIds={voice.speakingIds}
+            error={voice.error}
+            onJoin={voice.join}
+            onLeave={voice.leave}
+            onToggleMic={voice.toggleMic}
+          />
+        </div>
 
         {isHost ? (
           <HostConsole
             playing={playing}
             isLocked={isLocked}
+            waitForAll={waitForAll}
+            stalled={stalled}
             requests={requests}
             onTogglePlay={togglePlayback}
             onRestart={() => seek(0)}
             onInvite={() => setInviteOpen(true)}
             onToggleLock={() => emit("party:lock", { isLocked: !isLocked })}
+            onToggleWaitForAll={() => setWaitForAll(value => !value)}
             onChangeVideo={changeVideo}
             onGrant={targetId => {
               emit("control:grant", { userId: targetId });
@@ -412,7 +454,7 @@ export function PartyRoom({ party, userId }: { party: Party; userId: string }) {
         )}
 
         <div className="mt-6">
-          <ReactionBar onReact={emoji => emit("reaction:send", { emoji })} />
+          <ReactionBar onReact={react} />
         </div>
       </section>
 
@@ -434,7 +476,7 @@ export function PartyRoom({ party, userId }: { party: Party; userId: string }) {
             messages={messages}
             userId={userId}
             typing={typingNames}
-            onSend={message => emit("chat:send", { message })}
+            onSend={sendMessage}
             onTyping={() => emit("chat:typing")}
           />
         )}
@@ -443,6 +485,8 @@ export function PartyRoom({ party, userId }: { party: Party; userId: string }) {
             members={members}
             userId={userId}
             isHost={isHost}
+            stalledIds={stalled.map(item => item.userId)}
+            speakingIds={voice.speakingIds}
             onTransfer={targetId => emit("host:transfer", { userId: targetId })}
             onKick={targetId => emit("member:kick", { userId: targetId })}
           />
