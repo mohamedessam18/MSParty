@@ -14,7 +14,7 @@ export default async function PartyPage({ params }: { params: { id: string } }) 
     prisma.user.findUnique({ where: { id: userId } }),
     prisma.party.findUnique({
       where: { id: params.id },
-      include: { members: { include: { user: { select: { id: true, name: true, avatarUrl: true } } } } }
+      include: { members: { include: { user: { select: { id: true, name: true, avatarUrl: true, isGuest: true } } } } }
     })
   ]);
 

@@ -41,7 +41,15 @@ export function PeoplePanel({
             </span>
             {isHost && !isSelf && (
               <span className="flex shrink-0 gap-1">
-                <Button size="sm" variant="ghost" onClick={() => onTransfer(member.id)} title="سلّمه الاستضافة">
+                <Button
+                  size="sm"
+                  variant="ghost"
+                  // A guest session cannot be signed back into, so handing them
+                  // the room would strand it with an unreachable host.
+                  disabled={member.isGuest}
+                  onClick={() => onTransfer(member.id)}
+                  title={member.isGuest ? "الضيف لازم يعمل حساب الأول" : "سلّمه الاستضافة"}
+                >
                   ★
                 </Button>
                 <Button size="sm" variant="danger" onClick={() => onKick(member.id)} title="اطرده من البارتي">

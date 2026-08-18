@@ -276,9 +276,13 @@ async function changeVideo(
 async function transferHost(partyId: string, fromUserId: string, toUserId: string) {
   const target = await prisma.partyMember.findUnique({
     where: { partyId_userId: { partyId, userId: toUserId } },
-    include: { user: { select: { name: true } } }
+    include: { user: { select: { name: true, isGuest: true } } }
   });
   if (!target) throw new Error("Not a member");
+  // Creating a party already requires a real account, for the same reason:
+  // a guest session cannot be signed back into, so handing them the room
+  // would strand it with a host nobody can reach again.
+  if (target.user.isGuest) throw new Error("Guest cannot host");
 
   await prisma.$transaction([
     prisma.partyMember.update({ where: { partyId_userId: { partyId, userId: fromUserId } }, data: { role: "viewer" } }),
@@ -329,7 +333,10 @@ io.on("connection", rawSocket => {
       const party = await prisma.party.findUnique({ where: { id: partyId } });
       if (!member || !party) return socket.emit("error:unauthorized", { message: "مش عضو في البارتي ده" });
 
-      const dbUser = await prisma.user.findUnique({ where: { id: socket.userId }, select: { avatarUrl: true } });
+      const dbUser = await prisma.user.findUnique({
+        where: { id: socket.userId },
+        select: { avatarUrl: true, isGuest: true }
+      });
       socket.join(roomFor(partyId));
       socket.partyId = partyId;
 
@@ -350,7 +357,8 @@ io.on("connection", rawSocket => {
           userId: socket.userId,
           name: socket.userName,
           avatarUrl: dbUser?.avatarUrl,
-          role: member.role
+          role: member.role,
+          isGuest: dbUser?.isGuest
         });
       }
     } catch {
@@ -489,8 +497,11 @@ io.on("connection", rawSocket => {
     if (!(await requireHost(socket, partyId))) return;
     try {
       await transferHost(partyId, socket.userId!, userId);
-    } catch {
-      socket.emit("error:unauthorized", { message: "تعذر نقل التحكم" });
+    } catch (error) {
+      const isGuest = error instanceof Error && error.message === "Guest cannot host";
+      socket.emit("error:unauthorized", {
+        message: isGuest ? "الضيف لازم يعمل حساب الأول عشان يمسك التحكم" : "تعذر نقل التحكم"
+      });
     }
   });
 
@@ -503,8 +514,11 @@ io.on("connection", rawSocket => {
     if (!(await requireHost(socket, partyId))) return;
     try {
       await transferHost(partyId, socket.userId!, userId);
-    } catch {
-      socket.emit("error:unauthorized", { message: "تعذر نقل الاستضافة" });
+    } catch (error) {
+      const isGuest = error instanceof Error && error.message === "Guest cannot host";
+      socket.emit("error:unauthorized", {
+        message: isGuest ? "الضيف لازم يعمل حساب الأول عشان يستضيف" : "تعذر نقل الاستضافة"
+      });
     }
   });
 

@@ -37,6 +37,28 @@ export async function POST(request: Request) {
     }
 
     const user = await requireDbUser();
+
+    // Guests sign up with nothing but a name, and they cannot host, so they can
+    // never legitimately need a video slot — only an avatar. Without this, one
+    // name field stands between anyone and filling the bucket with 2 GB files.
+    if (isVideo && user.isGuest) {
+      return NextResponse.json({ message: "لازم تعمل حساب عشان ترفع فيديو." }, { status: 403 });
+    }
+
+    if (isVideo) {
+      // Rows are created before the bytes arrive, so an abandoned picker leaves
+      // a pending row behind. Cap how many a single user can hold open at once.
+      const pending = await prisma.uploadedVideo.count({
+        where: { uploaderId: user.id, partyId: null, cleanupAt: { not: null } }
+      });
+      if (pending >= 3) {
+        return NextResponse.json(
+          { message: "عندك رفعات كتير معلّقة. استنى شوية وجرّب تاني." },
+          { status: 429 }
+        );
+      }
+    }
+
     const safeName = fileName.replace(/[^a-zA-Z0-9._-]/g, "_");
     const prefix = isVideo ? "party-uploads" : "avatars";
     const key = `${prefix}/${user.id}/${crypto.randomUUID()}-${safeName}`;

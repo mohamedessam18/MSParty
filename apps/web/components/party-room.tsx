@@ -217,7 +217,7 @@ export function PartyRoom({ party, userId }: { party: Party; userId: string }) {
         client.on("party:memberJoined", (member: any) =>
           setMembers(items => [
             ...items.filter(item => item.id !== member.userId),
-            { id: member.userId, name: member.name, avatarUrl: member.avatarUrl, role: member.role || "viewer" }
+            { id: member.userId, name: member.name, avatarUrl: member.avatarUrl, role: member.role || "viewer", isGuest: member.isGuest }
           ])
         );
         client.on("party:memberLeft", ({ userId: gone }: { userId: string }) =>

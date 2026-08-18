@@ -1,4 +1,4 @@
-export type Member = { id: string; name: string; avatarUrl?: string | null; role: string };
+export type Member = { id: string; name: string; avatarUrl?: string | null; role: string; isGuest?: boolean };
 export type Message = { userId: string; name: string; message: string; sentAt: string; avatarUrl?: string | null };
 export type QueueItem = {
   id: string;
