@@ -47,12 +47,17 @@ export function YouTubePlayer({ videoId, enabled, onReady, onControl, onError, o
         playerInstance = new window.YT.Player(targetDiv, {
           videoId,
           playerVars: {
-            controls: enabled ? 1 : 0,
-            disablekb: enabled ? 0 : 1,
+            // Nobody uses YouTube's own bar any more — the room draws its own
+            // scrubber, volume, speed and fullscreen — and hiding it takes the
+            // progress bar, share button, settings and logo with it.
+            controls: 0,
+            disablekb: 1,
+            fs: 0,
             enablejsapi: 1,
             origin: typeof window !== "undefined" ? window.location.origin : "",
+            // Since 2018 this only limits suggestions to the same channel; it
+            // no longer removes them. The paused-state cover does that.
             rel: 0,
-            modestbranding: 1,
             iv_load_policy: 3,
             playsinline: 1,
             autoplay: 1,

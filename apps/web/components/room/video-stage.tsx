@@ -153,8 +153,21 @@ export const VideoStage = forwardRef<StageHandle, StageProps>(function VideoStag
               onError={props.onYtError}
               onBuffering={props.onBuffering}
             />
-            {/* Viewers must not be able to drive the embedded player itself. */}
-            {!isHost && <div className="absolute inset-0 z-10" onClick={event => event.preventDefault()} />}
+            {/* Nobody drives the embed directly — the host uses our bar, and a
+                stray click on the iframe would desync the room. */}
+            <div className="absolute inset-0 z-10" onClick={event => event.preventDefault()} />
+
+            {/* Paused, YouTube covers itself in a title bar and a grid of other
+                videos, and no player parameter turns those off. Our own cover
+                does, and it doubles as the room's paused state. */}
+            {!playing && !ytError && (
+              <div className="absolute inset-0 z-10 flex flex-col items-center justify-center gap-3 bg-ink-deep">
+                <span aria-hidden className="flex h-16 w-16 items-center justify-center rounded-full border border-gold/40 bg-gold/10 text-2xl text-gold">
+                  ❚❚
+                </span>
+                <p className="text-sm text-ivory-dim">{isHost ? "متوقف — شغّله لما تكونوا جاهزين" : "الهوست وقّف العرض"}</p>
+              </div>
+            )}
           </div>
         )}
 
