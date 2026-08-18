@@ -61,9 +61,13 @@ export function PartyRoom({ party, userId }: { party: Party; userId: string }) {
   /** Lets the keyboard shortcuts reach fullscreen and mute inside the stage. */
   const stageRef = useRef<StageHandle>(null);
 
-  const [members, setMembers] = useState<Member[]>(() =>
-    party.members.map(member => ({ ...member.user, role: member.role }))
-  );
+  // Seeded with just yourself: party.members is every person who ever joined,
+  // which is membership, not presence. The server's party:presence event
+  // replaces this with who is actually connected, moments after mount.
+  const [members, setMembers] = useState<Member[]>(() => {
+    const me = party.members.find(member => member.user.id === userId);
+    return me ? [{ ...me.user, role: me.role }] : [];
+  });
   const [role, setRole] = useState(() => party.members.find(member => member.user.id === userId)?.role ?? "viewer");
   const isHost = role === "host";
   // applyState runs inside socket callbacks registered once, so it needs the
@@ -232,19 +236,11 @@ export function PartyRoom({ party, userId }: { party: Party; userId: string }) {
           setTyping(items => [...items.filter(item => item.name !== name), { name, at: Date.now() }])
         );
 
-        // Members are keyed by id so a reconnect or a second tab cannot
-        // duplicate a person in the seat row.
-        client.on("party:memberJoined", (member: any) =>
-          setMembers(items => [
-            ...items.filter(item => item.id !== member.userId),
-            { id: member.userId, name: member.name, avatarUrl: member.avatarUrl, role: member.role || "viewer", isGuest: member.isGuest }
-          ])
-        );
-        client.on("party:memberLeft", ({ userId: gone }: { userId: string }) =>
-          setMembers(items => items.filter(item => item.id !== gone))
-        );
+        // One authoritative list beats join/leave deltas: a delta stream can
+        // only ever describe changes seen while this tab was open.
+        client.on("party:presence", ({ members: present }: { members: Member[] }) => setMembers(present));
+
         client.on("party:hostChanged", ({ hostId, name }: { hostId: string; name: string }) => {
-          setMembers(items => items.map(item => ({ ...item, role: item.id === hostId ? "host" : "viewer" })));
           setRole(hostId === userId ? "host" : "viewer");
           setRequests([]);
           setNotice(hostId === userId ? "بقيت أنت الهوست." : `${name} بقى الهوست.`);

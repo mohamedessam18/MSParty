@@ -17,7 +17,13 @@ const httpServer = createServer((request, response) => {
     response.end();
   });
 });
-const io = new Server(httpServer, { cors: { origin, methods: ["GET", "POST"] } });
+const io = new Server(httpServer, {
+  cors: { origin, methods: ["GET", "POST"] },
+  // Defaults take ~45s to notice a client that vanished without closing its
+  // socket (a killed network, a slept phone). This halves that.
+  pingInterval: 15000,
+  pingTimeout: 10000
+});
 
 const roomFor = (partyId: string) => `party:${partyId}`;
 const userRoom = (userId: string) => `user:${userId}`;
@@ -32,31 +38,52 @@ type PartySocket = Socket & {
 };
 
 /**
- * How many live sockets each user has in each party. A person with two tabs
- * open must not be announced twice, and closing one tab must not tell everyone
- * they left.
+ * Who is actually connected, per party, with a socket count per person. This is
+ * presence, not membership: PartyMember rows persist forever, so a list built
+ * from the database shows everyone who ever joined as though they were still
+ * in the room.
  */
-const presence = new Map<string, Map<string, number>>();
+type Present = { count: number; name: string; avatarUrl: string | null; role: string; isGuest: boolean };
+const presence = new Map<string, Map<string, Present>>();
 
-function addPresence(partyId: string, userId: string) {
-  const party = presence.get(partyId) ?? new Map<string, number>();
+function publishPresence(partyId: string) {
+  const party = presence.get(partyId);
+  io.to(roomFor(partyId)).emit("party:presence", {
+    members: party
+      ? [...party.entries()].map(([id, entry]) => ({
+          id,
+          name: entry.name,
+          avatarUrl: entry.avatarUrl,
+          role: entry.role,
+          isGuest: entry.isGuest
+        }))
+      : []
+  });
+}
+
+function addPresence(partyId: string, userId: string, who: Omit<Present, "count">) {
+  const party = presence.get(partyId) ?? new Map<string, Present>();
   presence.set(partyId, party);
-  const next = (party.get(userId) ?? 0) + 1;
-  party.set(userId, next);
-  return next === 1; // first connection for this user
+  const existing = party.get(userId);
+  // A second tab must not announce the person twice.
+  party.set(userId, { ...who, count: (existing?.count ?? 0) + 1 });
+  publishPresence(partyId);
 }
 
 function dropPresence(partyId: string, userId: string) {
   const party = presence.get(partyId);
-  if (!party) return false;
-  const next = (party.get(userId) ?? 1) - 1;
-  if (next <= 0) {
-    party.delete(userId);
-    if (!party.size) presence.delete(partyId);
-    return true; // last connection closed
-  }
-  party.set(userId, next);
-  return false;
+  const existing = party?.get(userId);
+  if (!party || !existing) return;
+  // Closing one tab of several is not leaving.
+  if (existing.count > 1) party.set(userId, { ...existing, count: existing.count - 1 });
+  else party.delete(userId);
+  if (!party.size) presence.delete(partyId);
+  publishPresence(partyId);
+}
+
+function setPresenceRole(partyId: string, userId: string, role: string) {
+  const entry = presence.get(partyId)?.get(userId);
+  if (entry) entry.role = role;
 }
 
 /** Who in each party is still loading video, and since when. */
@@ -295,6 +322,9 @@ async function transferHost(partyId: string, fromUserId: string, toUserId: strin
     prisma.party.update({ where: { id: partyId }, data: { hostId: toUserId } })
   ]);
 
+  setPresenceRole(partyId, fromUserId, "viewer");
+  setPresenceRole(partyId, toUserId, "host");
+  publishPresence(partyId);
   io.to(roomFor(partyId)).emit("party:hostChanged", { hostId: toUserId, name: target.user.name });
 }
 
@@ -358,16 +388,12 @@ io.on("connection", rawSocket => {
       });
       await emitQueue(partyId);
       publishReadiness(partyId);
-
-      if (addPresence(partyId, socket.userId!)) {
-        socket.to(roomFor(partyId)).emit("party:memberJoined", {
-          userId: socket.userId,
-          name: socket.userName,
-          avatarUrl: dbUser?.avatarUrl,
-          role: member.role,
-          isGuest: dbUser?.isGuest
-        });
-      }
+      addPresence(partyId, socket.userId!, {
+        name: socket.userName || "",
+        avatarUrl: dbUser?.avatarUrl ?? null,
+        role: member.role,
+        isGuest: !!dbUser?.isGuest
+      });
     } catch {
       socket.emit("error:unauthorized", { message: "تعذر الدخول للبارتي" });
     }
@@ -534,8 +560,8 @@ io.on("connection", rawSocket => {
     if (userId === socket.userId) return;
     await prisma.partyMember.deleteMany({ where: { partyId, userId } });
     io.to(userRoom(userId)).emit("party:kicked", { partyId });
-    io.to(roomFor(partyId)).emit("party:memberLeft", { userId });
     presence.get(partyId)?.delete(userId);
+    publishPresence(partyId);
     // Pull every tab that user has open out of the room.
     for (const client of await io.in(userRoom(userId)).fetchSockets()) client.leave(roomFor(partyId));
   });
@@ -618,9 +644,7 @@ io.on("connection", rawSocket => {
     if (!socket.partyId || !socket.userId) return;
     socket.to(voiceRoom(socket.partyId)).emit("voice:peerLeft", { socketId: socket.id });
     setBuffering(socket.partyId, socket.userId, socket.userName || "", false);
-    if (dropPresence(socket.partyId, socket.userId)) {
-      socket.to(roomFor(socket.partyId)).emit("party:memberLeft", { userId: socket.userId });
-    }
+    dropPresence(socket.partyId, socket.userId);
   });
 });
 
