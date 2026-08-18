@@ -16,6 +16,16 @@ import { adapterForHost, type Adapter } from "./platforms";
 const MARKER = "msparty-extension";
 const VERSION = chrome.runtime.getManifest().version;
 
+/**
+ * Says where it got to, out loud.
+ *
+ * This runs inside somebody else's page, across two message boundaries and a
+ * service worker, and none of it is visible from a terminal. Without a trail,
+ * "it does nothing" is all anyone can report — and that describes six different
+ * failures equally well.
+ */
+const say = (...parts: unknown[]) => console.log("%c[MSParty]", "color:#c9a227;font-weight:bold", ...parts);
+
 /** Announces the extension to our own page, which offers to use it if present. */
 document.documentElement.setAttribute(`data-${MARKER}`, VERSION);
 
@@ -29,12 +39,14 @@ type Session = { partyId: string; token: string; siteOrigin: string };
  * connection so the page never needs to know the extension's id.
  */
 function runOnSite() {
+  say(`v${VERSION} — على موقع MSParty. مستني إشارة فتح سهرة منصة.`);
   window.addEventListener("message", event => {
     if (event.source !== window || event.origin !== location.origin) return;
     const data = event.data;
     if (data?.source !== "msparty-site") return;
 
     if (data.type === "start-platform-party") {
+      say("وصلتني جلسة — بفتح", data.url);
       chrome.runtime.sendMessage({
         type: "start",
         session: { partyId: data.partyId, token: data.token, siteOrigin: location.origin },
@@ -87,6 +99,7 @@ function mountOverlay(session: Session) {
   document.documentElement.appendChild(frame);
   overlay = frame;
   followFullscreen();
+  say("اللوحة اتركّبت:", frame.src);
 }
 
 function unmountOverlay() {
@@ -207,22 +220,36 @@ function injectNetflixBridge() {
 async function runOnPlatform(found: Adapter) {
   adapter = found;
 
+  say(`v${VERSION} — منصة: ${found.slug}`);
+
   const stored = (await chrome.storage.local.get(["session"])) as { session?: Session };
   const session = stored.session;
-  if (!session?.partyId || !session.token) return;
+  if (!session?.partyId || !session.token) {
+    say("مفيش جلسة محفوظة. ابدأ من صفحة السهرة على MSParty ودوس «افتح على المنصة».");
+    return;
+  }
 
   if (found.slug === "netflix") injectNetflixBridge();
 
   // Services mount their player long after load, and route between titles
   // without a navigation. Wait for something watchable rather than giving up.
   const started = Date.now();
+  let announced = false;
   const timer = setInterval(() => {
-    if (found.watching() && found.video()) {
+    const watching = found.watching();
+    const video = found.video();
+    if (watching && video) {
       clearInterval(timer);
       mountOverlay(session);
       watchPlayer(session);
     } else if (Date.now() - started > 5 * 60 * 1000) {
       clearInterval(timer);
+      say("عدّت ٥ دقايق ومالقيتش فيديو. المسار:", location.pathname, "· صفحة مشاهدة؟", watching);
+    } else if (!announced && Date.now() - started > 8000) {
+      // Said once, eight seconds in: long enough that a slow player is not
+      // reported as a fault, soon enough to be useful while someone is looking.
+      announced = true;
+      say("مستني الفيديو — صفحة مشاهدة؟", watching, "· لقيت <video>؟", !!video, "· المسار:", location.pathname);
     }
   }, 1000);
 }
