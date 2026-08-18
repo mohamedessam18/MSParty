@@ -3,6 +3,12 @@
   "name": "MSParty",
   "version": "0.2.0",
   "description": "اتفرجوا مع بعض على نتفليكس وشاهد وديزني+. بيزامن التشغيل بس — مابيسجّلش ولا بينقل أي صورة أو صوت من الفيديو.",
+  "icons": {
+    "16": "icons/icon-16.png",
+    "32": "icons/icon-32.png",
+    "48": "icons/icon-48.png",
+    "128": "icons/icon-128.png"
+  },
   "permissions": ["storage", "tabs"],
   "host_permissions": [
     "https://www.netflix.com/*",
@@ -41,5 +47,12 @@
       "matches": ["https://www.netflix.com/*"]
     }
   ],
-  "action": { "default_popup": "popup.html" }
+  "action": {
+    "default_popup": "popup.html",
+    "default_icon": {
+      "16": "icons/icon-16.png",
+      "32": "icons/icon-32.png",
+      "48": "icons/icon-48.png"
+    }
+  }
 }
