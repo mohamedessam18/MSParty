@@ -14,7 +14,7 @@ import { PeoplePanel } from "./room/people-panel";
 import { QueuePanel } from "./room/queue-panel";
 import { ReactionBar, ReactionLayer } from "./room/reaction-layer";
 import { StageOverlay } from "./room/stage-overlay";
-import { CameraBubbles } from "./room/camera-bubbles";
+import { CameraBubbles, CameraCorner, CameraStrip } from "./room/camera-bubbles";
 import { SubtitleLayer } from "./room/subtitle-layer";
 import { useScreenWake } from "./room/use-screen-wake";
 import { useCall } from "./room/use-call";
@@ -591,8 +591,7 @@ export function PartyRoom({ party, userId }: { party: Party; userId: string }) {
             onToggleSubtitles={() => setSubtitlesOn(value => !value)}
             subtitles={<SubtitleLayer url={subtitlesUrl} currentTime={currentTime} enabled={subtitlesOn} />}
             cameras={
-              <CameraBubbles
-                compact
+              <CameraCorner
                 peers={call.peers}
                 localStream={call.localStream}
                 cameraOn={call.cameraOn}
@@ -610,6 +609,15 @@ export function PartyRoom({ party, userId }: { party: Party; userId: string }) {
         </p>
 
         <MemberSeats members={members} userId={userId} stalledIds={stalled.map(item => item.userId)} />
+
+        {/* Phones get an inline row; desktops get the floating bubbles below. */}
+        <CameraStrip
+          peers={call.peers}
+          localStream={call.localStream}
+          cameraOn={call.cameraOn}
+          speakingIds={call.speakingIds}
+          userId={userId}
+        />
 
         <div className="mt-6">
           <VoiceBar
