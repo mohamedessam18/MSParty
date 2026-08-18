@@ -117,7 +117,11 @@ export function PartyRoom({ party, userId }: { party: Party; userId: string }) {
     if (rate.current === next) return;
     rate.current = next;
     if (video.current) video.current.playbackRate = next;
-    player.current?.setRate(next);
+    try {
+      player.current?.setRate(next);
+    } catch {
+      player.current = undefined;
+    }
   }, []);
 
   const applyState = useCallback(
@@ -165,12 +169,20 @@ export function PartyRoom({ party, userId }: { party: Party; userId: string }) {
         // or a viewer stays frozen wherever they drifted to.
         if (Math.abs(drift) > 0.5) {
           if (video.current) video.current.currentTime = corrected;
-          player.current?.seekTo(corrected);
+          try {
+            player.current?.seekTo(corrected);
+          } catch {
+            player.current = undefined;
+          }
         }
       } else if (Math.abs(drift) > HARD_SEEK) {
         applyRate(1);
         if (video.current) video.current.currentTime = corrected;
-        player.current?.seekTo(corrected);
+        try {
+          player.current?.seekTo(corrected);
+        } catch {
+          player.current = undefined;
+        }
       } else if (Math.abs(drift) > NUDGE) {
         // Behind the host: run slightly fast. Ahead: run slightly slow.
         applyRate(drift > 0 ? 1.05 : 0.95);
@@ -192,19 +204,26 @@ export function PartyRoom({ party, userId }: { party: Party; userId: string }) {
           video.current.pause();
         }
       }
-      if (player.current) {
-        if (isPlaying) {
-          // The IFrame player gives us no failure signal, so we cannot retry the
-          // way the <video> path does. Stay muted until the viewer clicks the
-          // unmute button — that click is the gesture that earns us sound.
-          if (!hasGesture.current) {
-            player.current.mute(true);
-            setMuted(true);
+      // Every call into the embed is guarded: once it has been torn down its
+      // methods throw, and an unguarded throw here abandoned the rest of the
+      // sync for that message.
+      try {
+        if (player.current) {
+          if (isPlaying) {
+            // The IFrame player gives us no failure signal, so we cannot retry
+            // the way the <video> path does. Stay muted until the viewer clicks
+            // unmute — that click is the gesture that earns us sound.
+            if (!hasGesture.current) {
+              player.current.mute(true);
+              setMuted(true);
+            }
+            player.current.play();
+          } else {
+            player.current.pause();
           }
-          player.current.play();
-        } else {
-          player.current.pause();
         }
+      } catch {
+        player.current = undefined;
       }
     },
     [applyRate]
@@ -252,7 +271,11 @@ export function PartyRoom({ party, userId }: { party: Party; userId: string }) {
           baseRate.current = next;
           setRoomRate(next);
           if (video.current) video.current.playbackRate = next;
-          player.current?.setRate(next);
+          try {
+            player.current?.setRate(next);
+          } catch {
+            player.current = undefined;
+          }
         });
         client.on("party:subtitlesChanged", ({ url }: { url: string | null }) => setSubtitlesUrl(url));
         client.on("party:kicked", () => router.replace("/dashboard"));
@@ -322,8 +345,12 @@ export function PartyRoom({ party, userId }: { party: Party; userId: string }) {
         setCurrentTime(video.current.currentTime || 0);
         setDuration(video.current.duration || 0);
       } else if (player.current) {
-        setCurrentTime(player.current.currentTime() || 0);
-        setDuration(player.current.duration() || 0);
+        try {
+          setCurrentTime(player.current.currentTime() || 0);
+          setDuration(player.current.duration() || 0);
+        } catch {
+          player.current = undefined;
+        }
       }
     }, 500);
     return () => clearInterval(timer);
@@ -352,19 +379,33 @@ export function PartyRoom({ party, userId }: { party: Party; userId: string }) {
     [control]
   );
 
+  /**
+   * The embedded player throws once it has been torn down, so every call into
+   * it is guarded: a throw here used to abort the whole handler, leaving the
+   * <video> untouched and the control message unsent.
+   */
+  const drivePlayer = useCallback((action: (handle: PlayerHandle) => void) => {
+    if (!player.current) return;
+    try {
+      action(player.current);
+    } catch {
+      player.current = undefined;
+    }
+  }, []);
+
   const togglePlayback = useCallback(() => {
-    const timestamp = player.current?.currentTime() || video.current?.currentTime || 0;
+    const timestamp = video.current?.currentTime ?? player.current?.currentTime() ?? 0;
     selfDriven.current = Date.now() + 700;
     if (playing) {
-      player.current?.pause();
+      drivePlayer(handle => handle.pause());
       video.current?.pause();
       control("pause", timestamp);
     } else {
-      player.current?.play();
+      drivePlayer(handle => handle.play());
       video.current?.play().catch(() => undefined);
       control("play", timestamp);
     }
-  }, [playing, control]);
+  }, [playing, control, drivePlayer]);
 
   // The hold itself lives on the sync server, which owns isPlaying. Driving it
   // from here meant a backgrounded host tab stopped releasing the room, and
@@ -375,7 +416,7 @@ export function PartyRoom({ party, userId }: { party: Party; userId: string }) {
     setCurrentTime(seconds);
     selfDriven.current = Date.now() + 700;
     if (video.current) video.current.currentTime = seconds;
-    player.current?.seekTo(seconds);
+    drivePlayer(handle => handle.seekTo(seconds));
     control("seek", seconds);
   }
 
@@ -389,15 +430,15 @@ export function PartyRoom({ party, userId }: { party: Party; userId: string }) {
     if (!target) return;
     selfDriven.current = Date.now() + 700;
     if (video.current) video.current.currentTime = target.at;
-    player.current?.seekTo(target.at);
+    drivePlayer(handle => handle.seekTo(target.at));
     if (!target.play) return;
-    if (!isHostRef.current && !hasGesture.current) {
-      player.current?.mute(true);
+    if (!isHostRef.current && !hasGesture.current && !video.current) {
+      drivePlayer(handle => handle.mute(true));
       setMuted(true);
     }
-    player.current?.play();
+    drivePlayer(handle => handle.play());
     video.current?.play().catch(() => undefined);
-  }, []);
+  }, [drivePlayer]);
 
   function unmute() {
     hasGesture.current = true;
@@ -407,8 +448,10 @@ export function PartyRoom({ party, userId }: { party: Party; userId: string }) {
       video.current.volume = 1;
       video.current.play().catch(() => undefined);
     }
-    player.current?.mute(false);
-    player.current?.setVolume(100);
+    drivePlayer(handle => {
+      handle.mute(false);
+      handle.setVolume(100);
+    });
   }
 
   const typingNames = useMemo(() => typing.map(item => item.name), [typing]);

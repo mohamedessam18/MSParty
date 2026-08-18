@@ -100,6 +100,14 @@ export const VideoStage = forwardRef<StageHandle, StageProps>(function VideoStag
 
   const isUpload = contentType !== "youtube";
 
+  // React nulls videoRef by itself when the <video> unmounts, but playerRef is
+  // assigned by hand in onReady and nothing ever cleared it. After a swap from
+  // YouTube to an upload it still pointed at a destroyed player, whose methods
+  // throw — which aborted play/pause before it ever reached the <video>.
+  useEffect(() => {
+    if (isUpload) props.playerRef.current = undefined;
+  }, [isUpload, props.playerRef]);
+
   return (
     <div className="marquee-frame">
       <div
