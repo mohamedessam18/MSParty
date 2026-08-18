@@ -697,7 +697,7 @@ export function PartyRoom({ party, userId }: { party: Party; userId: string }) {
             speakingIds={call.speakingIds}
             onTransfer={targetId => emit("host:transfer", { userId: targetId })}
             onKick={targetId => emit("member:kick", { userId: targetId })}
-            cameraIds={call.peers.filter(peer => peer.hasVideo).map(peer => peer.userId)}
+            cameraIds={call.cameraUserIds}
             onDisableCamera={targetId => emit("camera:disable", { userId: targetId })}
           />
         )}

@@ -30,6 +30,12 @@ export function useCall(socket: React.MutableRefObject<Socket | undefined>, part
   const [cameraOn, setCameraOn] = useState(false);
   const [peers, setPeers] = useState<CallPeer[]>([]);
   const [speakingIds, setSpeakingIds] = useState<string[]>([]);
+  /**
+   * Who has a camera open, straight from the server. Derived from peers alone
+   * this would be empty for a host who never joined the call, leaving them
+   * unable to moderate cameras at all.
+   */
+  const [cameraUserIds, setCameraUserIds] = useState<string[]>([]);
   const [localStream, setLocalStream] = useState<MediaStream | null>(null);
   const [error, setError] = useState<string | null>(null);
 
@@ -72,17 +78,23 @@ export function useCall(socket: React.MutableRefObject<Socket | undefined>, part
       };
       connection.ontrack = event => {
         const remote = event.streams[0];
-        setPeers(items => [
-          ...items.filter(peer => peer.socketId !== socketId),
-          { socketId, userId, name, stream: remote, hasVideo: remote.getVideoTracks().some(track => track.enabled) }
-        ]);
-        // A camera can be switched off later; reflect that without a new stream.
-        remote.onremovetrack = () =>
-          setPeers(items =>
-            items.map(peer =>
-              peer.socketId === socketId ? { ...peer, hasVideo: remote.getVideoTracks().length > 0 } : peer
-            )
-          );
+        const live = () => remote.getVideoTracks().some(track => track.readyState === "live" && !track.muted);
+        const sync = () =>
+          setPeers(items => {
+            const rest = items.filter(peer => peer.socketId !== socketId);
+            return [...rest, { socketId, userId, name, stream: remote, hasVideo: live() }];
+          });
+
+        // removetrack alone is not dependable across browsers when a sender is
+        // removed, so follow the track's own lifecycle as well. Whichever
+        // fires first, the bubble disappears instead of freezing on a still.
+        if (event.track.kind === "video") {
+          event.track.onended = sync;
+          event.track.onmute = sync;
+          event.track.onunmute = sync;
+        }
+        remote.onremovetrack = sync;
+        sync();
       };
       connection.onconnectionstatechange = () => {
         if (["failed", "closed"].includes(connection.connectionState)) closePeer(socketId);
@@ -224,6 +236,7 @@ export function useCall(socket: React.MutableRefObject<Socket | undefined>, part
     const onPeerLeft = ({ socketId }: { socketId: string }) => closePeer(socketId);
     const onSpeaking = ({ userId, speaking }: { userId: string; speaking: boolean }) =>
       setSpeakingIds(items => (speaking ? [...new Set([...items, userId])] : items.filter(id => id !== userId)));
+    const onCameraList = ({ userIds }: { userIds: string[] }) => setCameraUserIds(userIds);
     const onCameraBlocked = ({ message }: { message: string }) => {
       setError(message);
       stopCamera();
@@ -234,6 +247,7 @@ export function useCall(socket: React.MutableRefObject<Socket | undefined>, part
     client.on("voice:peerJoined", onPeerJoined);
     client.on("voice:peerLeft", onPeerLeft);
     client.on("voice:speaking", onSpeaking);
+    client.on("camera:list", onCameraList);
     client.on("camera:blocked", onCameraBlocked);
 
     return () => {
@@ -242,6 +256,7 @@ export function useCall(socket: React.MutableRefObject<Socket | undefined>, part
       client.off("voice:peerJoined", onPeerJoined);
       client.off("voice:peerLeft", onPeerLeft);
       client.off("voice:speaking", onSpeaking);
+      client.off("camera:list", onCameraList);
       client.off("camera:blocked", onCameraBlocked);
     };
   }, [socket, ready, createPeer, closePeer, stopCamera]);
@@ -254,6 +269,7 @@ export function useCall(socket: React.MutableRefObject<Socket | undefined>, part
     cameraOn,
     peers,
     speakingIds,
+    cameraUserIds,
     localStream,
     error,
     join,
