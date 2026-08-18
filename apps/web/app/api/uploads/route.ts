@@ -9,6 +9,7 @@ export const dynamic = "force-dynamic";
 
 const MAX_VIDEO = 2 * 1024 ** 3;
 const MAX_IMAGE = 5 * 1024 ** 2;
+const MAX_SUBTITLE = 2 * 1024 ** 2;
 /** 32MB parts: 2GB stays under S3's 10,000-part cap with room to spare. */
 const PART_SIZE = 32 * 1024 ** 2;
 
@@ -17,11 +18,13 @@ export async function POST(request: Request) {
     const { fileName, contentType, fileSize } = await request.json();
     const isVideo = !!contentType?.startsWith("video/");
     const isImage = !!contentType?.startsWith("image/");
+    // Subtitles are normalised to WebVTT in the browser before they get here.
+    const isSubtitle = contentType === "text/vtt";
 
     if (!fileName || !Number.isFinite(fileSize) || fileSize <= 0) {
       return NextResponse.json({ message: "بيانات الملف ناقصة." }, { status: 400 });
     }
-    if (!isVideo && !isImage) {
+    if (!isVideo && !isImage && !isSubtitle) {
       // Some containers (.mkv, .avi) come through with an empty type on certain
       // systems, so say what actually went wrong instead of "not allowed".
       return NextResponse.json(
@@ -33,9 +36,10 @@ export async function POST(request: Request) {
         { status: 400 }
       );
     }
-    if (fileSize > (isVideo ? MAX_VIDEO : MAX_IMAGE)) {
+    const limit = isVideo ? MAX_VIDEO : isImage ? MAX_IMAGE : MAX_SUBTITLE;
+    if (fileSize > limit) {
       return NextResponse.json(
-        { message: isVideo ? "أقصى حجم للفيديو 2GB" : "أقصى حجم للصورة 5MB" },
+        { message: isVideo ? "أقصى حجم للفيديو 2GB" : isImage ? "أقصى حجم للصورة 5MB" : "ملف الترجمة كبير جدًا." },
         { status: 400 }
       );
     }
@@ -44,10 +48,10 @@ export async function POST(request: Request) {
     const safeName = fileName.replace(/[^a-zA-Z0-9._-]/g, "_");
     const client = r2Client();
 
-    // Avatars stay a single PUT: they are small, and they get no library row —
-    // an avatar has no owning party and must outlive one.
-    if (isImage) {
-      const key = `avatars/${user.id}/${crypto.randomUUID()}-${safeName}`;
+    // Avatars and subtitle tracks stay a single PUT: they are small, and they
+    // get no library row — neither belongs to the video-reuse flow.
+    if (isImage || isSubtitle) {
+      const key = `${isImage ? "avatars" : "subtitles"}/${user.id}/${crypto.randomUUID()}-${safeName}`;
       const uploadUrl = await getSignedUrl(
         client,
         new PutObjectCommand({ Bucket: process.env.R2_BUCKET, Key: key, ContentType: contentType }),

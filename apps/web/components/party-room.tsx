@@ -14,10 +14,14 @@ import { PeoplePanel } from "./room/people-panel";
 import { QueuePanel } from "./room/queue-panel";
 import { ReactionBar, ReactionLayer } from "./room/reaction-layer";
 import { StageOverlay } from "./room/stage-overlay";
+import { SubtitleLayer } from "./room/subtitle-layer";
+import { useScreenWake } from "./room/use-screen-wake";
 import { useVoice } from "./room/use-voice";
 import { VideoStage } from "./room/video-stage";
 import { VoiceBar } from "./room/voice-bar";
 import type { ControlRequest, FlyingReaction, Member, Message, QueueItem } from "./room/types";
+import { parseSubtitles, toVtt } from "@/lib/subtitles";
+import type { StageHandle } from "./room/video-stage";
 
 type Party = {
   id: string;
@@ -42,6 +46,8 @@ export function PartyRoom({ party, userId }: { party: Party; userId: string }) {
   const player = useRef<PlayerHandle>();
   const video = useRef<HTMLVideoElement | null>(null);
   const rate = useRef(1);
+  /** The speed the host chose for the room; drift correction rides on top. */
+  const baseRate = useRef(1);
   /** Set once the viewer clicks to unmute — the browser's price for audio. */
   const hasGesture = useRef(false);
   /** Where to jump once a player finally reports ready. */
@@ -52,6 +58,8 @@ export function PartyRoom({ party, userId }: { party: Party; userId: string }) {
    * player-originated events briefly after we drive it ourselves.
    */
   const selfDriven = useRef(0);
+  /** Lets the keyboard shortcuts reach fullscreen and mute inside the stage. */
+  const stageRef = useRef<StageHandle>(null);
 
   const [members, setMembers] = useState<Member[]>(() =>
     party.members.map(member => ({ ...member.user, role: member.role }))
@@ -85,14 +93,21 @@ export function PartyRoom({ party, userId }: { party: Party; userId: string }) {
   const [contentType, setContentType] = useState(party.contentType);
   const [contentUrl, setContentUrl] = useState(party.contentUrl || "");
   const [ytError, setYtError] = useState<string | null>(null);
+  const [roomRate, setRoomRate] = useState(1);
+  const [subtitlesUrl, setSubtitlesUrl] = useState<string | null>(null);
+  const [subtitlesOn, setSubtitlesOn] = useState(true);
   const [currentTime, setCurrentTime] = useState(0);
   const [duration, setDuration] = useState(0);
 
   const voice = useVoice(socket, party.id, connected);
   const hostName = members.find(member => member.role === "host")?.name || "الهوست";
 
-  /** Nudges playback speed toward the host's position instead of jumping. */
-  const setRate = useCallback((next: number) => {
+  /**
+   * Drift correction multiplies the room's chosen speed rather than replacing
+   * it, so nudging a viewer back into sync cannot quietly cancel 1.5x.
+   */
+  const applyRate = useCallback((correction: number) => {
+    const next = Number((baseRate.current * correction).toFixed(3));
     if (rate.current === next) return;
     rate.current = next;
     if (video.current) video.current.playbackRate = next;
@@ -100,10 +115,15 @@ export function PartyRoom({ party, userId }: { party: Party; userId: string }) {
   }, []);
 
   const applyState = useCallback(
-    ({ isPlaying, timestamp, serverTime, contentType: incomingType, contentUrl: incomingUrl, role: incomingRole, isLocked: incomingLock, authoritative }: any) => {
+    ({ isPlaying, timestamp, serverTime, contentType: incomingType, contentUrl: incomingUrl, role: incomingRole, isLocked: incomingLock, subtitlesUrl: incomingSubs, rate: incomingRate, authoritative }: any) => {
       setPlaying(isPlaying);
       if (incomingRole) setRole(incomingRole);
       if (typeof incomingLock === "boolean") setIsLocked(incomingLock);
+      if (incomingSubs !== undefined) setSubtitlesUrl(incomingSubs);
+      if (typeof incomingRate === "number") {
+        baseRate.current = incomingRate;
+        setRoomRate(incomingRate);
+      }
       if (incomingType && incomingUrl) {
         setContentType(incomingType);
         setContentUrl(incomingUrl);
@@ -134,7 +154,7 @@ export function PartyRoom({ party, userId }: { party: Party; userId: string }) {
       if (!video.current && !player.current) pendingSeek.current = { at: corrected, play: isPlaying };
 
       if (!isPlaying) {
-        setRate(1);
+        applyRate(1);
         // Paused rooms get no rate correction, so alignment has to happen here
         // or a viewer stays frozen wherever they drifted to.
         if (Math.abs(drift) > 0.5) {
@@ -142,14 +162,14 @@ export function PartyRoom({ party, userId }: { party: Party; userId: string }) {
           player.current?.seekTo(corrected);
         }
       } else if (Math.abs(drift) > HARD_SEEK) {
-        setRate(1);
+        applyRate(1);
         if (video.current) video.current.currentTime = corrected;
         player.current?.seekTo(corrected);
       } else if (Math.abs(drift) > NUDGE) {
         // Behind the host: run slightly fast. Ahead: run slightly slow.
-        setRate(drift > 0 ? 1.05 : 0.95);
+        applyRate(drift > 0 ? 1.05 : 0.95);
       } else if (Math.abs(drift) < SETTLED) {
-        setRate(1);
+        applyRate(1);
       }
 
       if (video.current) {
@@ -181,7 +201,7 @@ export function PartyRoom({ party, userId }: { party: Party; userId: string }) {
         }
       }
     },
-    [setRate]
+    [applyRate]
   );
 
   useEffect(() => {
@@ -230,6 +250,13 @@ export function PartyRoom({ party, userId }: { party: Party; userId: string }) {
           setNotice(hostId === userId ? "بقيت أنت الهوست." : `${name} بقى الهوست.`);
         });
         client.on("party:lockChanged", ({ isLocked: locked }: { isLocked: boolean }) => setIsLocked(locked));
+        client.on("party:rateChanged", ({ rate: next }: { rate: number }) => {
+          baseRate.current = next;
+          setRoomRate(next);
+          if (video.current) video.current.playbackRate = next;
+          player.current?.setRate(next);
+        });
+        client.on("party:subtitlesChanged", ({ url }: { url: string | null }) => setSubtitlesUrl(url));
         client.on("party:kicked", () => router.replace("/dashboard"));
         client.on(
           "party:readiness",
@@ -399,6 +426,64 @@ export function PartyRoom({ party, userId }: { party: Party; userId: string }) {
   const sendMessage = (message: string) => emit("chat:send", { message });
   const react = (emoji: string) => emit("reaction:send", { emoji });
 
+  /** Normalises SRT or VTT to WebVTT, stores it, and tells the room. */
+  async function uploadSubtitles(file: File) {
+    const text = await file.text();
+    const cues = parseSubtitles(text);
+    if (!cues.length) throw new Error("مش لاقيين ترجمات في الملف ده.");
+    const blob = new Blob([toVtt(cues)], { type: "text/vtt" });
+
+    const signed = await fetch("/api/uploads", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ fileName: `${file.name.replace(/\.[^.]+$/, "")}.vtt`, contentType: "text/vtt", fileSize: blob.size })
+    });
+    const data = await signed.json().catch(() => ({}));
+    if (!signed.ok) throw new Error(data.message || "تعذر رفع الترجمة.");
+
+    const put = await fetch(data.uploadUrl, { method: "PUT", headers: { "Content-Type": "text/vtt" }, body: blob });
+    if (!put.ok) throw new Error("رفع الترجمة لم يكتمل.");
+    emit("party:subtitles", { url: data.fileUrl });
+  }
+
+  // Keyboard shortcuts. Transport keys are host-only for the same reason the
+  // viewer control bar has none: playback position is the host's to decide.
+  useEffect(() => {
+    function onKeyDown(event: KeyboardEvent) {
+      const target = event.target as HTMLElement | null;
+      if (target && /^(INPUT|TEXTAREA|SELECT)$/.test(target.tagName)) return;
+      if (target?.isContentEditable || event.metaKey || event.ctrlKey || event.altKey) return;
+
+      const key = event.key.toLowerCase();
+      if (key === "f") {
+        event.preventDefault();
+        return stageRef.current?.toggleFullscreen();
+      }
+      if (key === "m") {
+        event.preventDefault();
+        return stageRef.current?.toggleMute();
+      }
+      if (key === "c") {
+        event.preventDefault();
+        return setSubtitlesOn(value => !value);
+      }
+      if (!isHostRef.current) return;
+      if (key === " " || key === "k") {
+        event.preventDefault();
+        return togglePlayback();
+      }
+      if (event.key === "ArrowRight" || event.key === "ArrowLeft") {
+        event.preventDefault();
+        // RTL page, but arrows follow the timeline, not the text direction.
+        seek(Math.max(0, currentTime + (event.key === "ArrowRight" ? 5 : -5)));
+      }
+    }
+    window.addEventListener("keydown", onKeyDown);
+    return () => window.removeEventListener("keydown", onKeyDown);
+  }, [togglePlayback, currentTime]);
+
+  useScreenWake(playing);
+
   return (
     <main className="min-h-screen px-4 py-4 sm:px-6">
       <header className="mx-auto flex max-w-6xl flex-wrap items-center justify-between gap-3">
@@ -451,6 +536,13 @@ export function PartyRoom({ party, userId }: { party: Party; userId: string }) {
             onUnmute={unmute}
             onYtError={setYtError}
             onBuffering={isBuffering => emit("viewer:buffering", { isBuffering })}
+            ref={stageRef}
+            rate={roomRate}
+            onRateChange={next => emit("control:rate", { rate: next })}
+            subtitlesUrl={subtitlesUrl}
+            subtitlesOn={subtitlesOn}
+            onToggleSubtitles={() => setSubtitlesOn(value => !value)}
+            subtitles={<SubtitleLayer url={subtitlesUrl} currentTime={currentTime} enabled={subtitlesOn} />}
             overlay={<StageOverlay messages={messages} onSend={sendMessage} onReact={react} />}
           />
           <ReactionLayer reactions={reactions} />
@@ -489,6 +581,9 @@ export function PartyRoom({ party, userId }: { party: Party; userId: string }) {
             onToggleWaitForAll={() => emit("party:waitForAll", { enabled: !waitForAll })}
             onChangeVideo={swapToYouTube}
             onSwapToUpload={swapToUpload}
+            subtitlesUrl={subtitlesUrl}
+            onUploadSubtitles={uploadSubtitles}
+            onClearSubtitles={() => emit("party:subtitles", { url: null })}
             onGrant={targetId => {
               emit("control:grant", { userId: targetId });
               setRequests(items => items.filter(item => item.userId !== targetId));

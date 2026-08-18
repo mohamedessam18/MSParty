@@ -35,6 +35,9 @@ model Party {
   currentTimestamp Float @default(0)
   isPlaying Boolean @default(false)
   isLocked Boolean @default(false)
+  // Shared so everyone reads the same cues at the same speed.
+  subtitlesUrl String?
+  playbackRate Float @default(1)
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
   members PartyMember[]

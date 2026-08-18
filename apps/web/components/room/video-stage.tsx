@@ -1,5 +1,5 @@
 "use client";
-import { useCallback, useEffect, useRef, useState } from "react";
+import { forwardRef, useCallback, useEffect, useImperativeHandle, useRef, useState } from "react";
 import { YouTubePlayer, type PlayerHandle } from "@/components/youtube-player";
 import { formatTime, videoId } from "./types";
 
@@ -26,9 +26,20 @@ export type StageProps = {
   onPlayerReady: () => void;
   /** Rendered inside the stage, so it survives the fullscreen subtree. */
   overlay?: React.ReactNode;
+  subtitles?: React.ReactNode;
+  subtitlesUrl: string | null;
+  subtitlesOn: boolean;
+  onToggleSubtitles: () => void;
+  rate: number;
+  onRateChange: (rate: number) => void;
 };
 
-export function VideoStage(props: StageProps) {
+/** Exposed so the room's keyboard shortcuts can drive fullscreen and mute. */
+export type StageHandle = { toggleFullscreen: () => void; toggleMute: () => void };
+
+const RATES = [0.75, 1, 1.25, 1.5, 2];
+
+export const VideoStage = forwardRef<StageHandle, StageProps>(function VideoStage(props, ref) {
   const { contentType, contentUrl, isHost, playing, ytError, muted, waitingFor } = props;
   const shell = useRef<HTMLDivElement>(null);
   const [volume, setVolume] = useState(100);
@@ -69,9 +80,21 @@ export function VideoStage(props: StageProps) {
     [props.videoRef, props.playerRef]
   );
 
-  function toggleFullscreen() {
+  const toggleFullscreen = useCallback(() => {
     if (document.fullscreenElement) document.exitFullscreen().catch(() => undefined);
     else shell.current?.requestFullscreen().catch(() => undefined);
+  }, []);
+
+  const toggleMute = useCallback(() => applyVolume(volume === 0 ? 100 : 0), [applyVolume, volume]);
+
+  useImperativeHandle(ref, () => ({ toggleFullscreen, toggleMute }), [toggleFullscreen, toggleMute]);
+
+  /** Picture-in-Picture only exists for real <video>; an iframe cannot pop out. */
+  function togglePip() {
+    const element = props.videoRef.current;
+    if (!element) return;
+    if (document.pictureInPictureElement) document.exitPictureInPicture().catch(() => undefined);
+    else element.requestPictureInPicture?.().catch(() => undefined);
   }
 
   const isUpload = contentType !== "youtube";
@@ -150,6 +173,8 @@ export function VideoStage(props: StageProps) {
           </button>
         )}
 
+        {props.subtitles}
+
         {/* Only mounted in fullscreen: outside it, the page's own panels are
             visible and a second copy would just duplicate them. */}
         {fullscreen && props.overlay && (
@@ -195,6 +220,20 @@ export function VideoStage(props: StageProps) {
                 {props.duration > 0 && ` / ${formatTime(props.duration)}`}
               </span>
               <StageVolume volume={volume} onChange={applyVolume} />
+              <select
+                aria-label="سرعة التشغيل"
+                value={props.rate}
+                onChange={event => props.onRateChange(Number(event.target.value))}
+                className="mono rounded border border-velvet-hi bg-ink px-1.5 py-1 text-xs text-ivory"
+              >
+                {RATES.map(value => (
+                  <option key={value} value={value}>
+                    {value}x
+                  </option>
+                ))}
+              </select>
+              {props.subtitlesUrl && <SubtitleButton on={props.subtitlesOn} onClick={props.onToggleSubtitles} />}
+              {isUpload && <PipButton onClick={togglePip} />}
               <FullscreenButton active={fullscreen} onClick={toggleFullscreen} />
             </div>
           ) : (
@@ -202,7 +241,12 @@ export function VideoStage(props: StageProps) {
             // playback position stays the host's to decide.
             <div className="mb-2 flex items-center gap-3 rounded-lg border border-velvet-hi bg-ink/90 p-2">
               <StageVolume volume={volume} onChange={applyVolume} />
-              <span className="mono flex-1 text-xs text-ivory-dim">{formatTime(props.currentTime)}</span>
+              <span className="mono flex-1 text-xs text-ivory-dim">
+                {formatTime(props.currentTime)}
+                {props.rate !== 1 && <span className="mr-1.5 text-gold">{props.rate}x</span>}
+              </span>
+              {props.subtitlesUrl && <SubtitleButton on={props.subtitlesOn} onClick={props.onToggleSubtitles} />}
+              {isUpload && <PipButton onClick={togglePip} />}
               <FullscreenButton active={fullscreen} onClick={toggleFullscreen} />
             </div>
           )}
@@ -210,7 +254,7 @@ export function VideoStage(props: StageProps) {
       </div>
     </div>
   );
-}
+});
 
 function StageVolume({ volume, onChange }: { volume: number; onChange: (next: number) => void }) {
   return (
@@ -232,6 +276,33 @@ function StageVolume({ volume, onChange }: { volume: number; onChange: (next: nu
         className="h-1.5 w-16 cursor-pointer accent-gold"
       />
     </div>
+  );
+}
+
+function SubtitleButton({ on, onClick }: { on: boolean; onClick: () => void }) {
+  return (
+    <button
+      onClick={onClick}
+      aria-pressed={on}
+      aria-label="الترجمة"
+      title="الترجمة (C)"
+      className={`rounded border px-2 py-1 text-xs ${on ? "border-gold bg-gold/15 text-gold" : "border-velvet-hi text-ivory-dim hover:bg-velvet-hi"}`}
+    >
+      CC
+    </button>
+  );
+}
+
+function PipButton({ onClick }: { onClick: () => void }) {
+  return (
+    <button
+      onClick={onClick}
+      aria-label="صورة داخل صورة"
+      title="صورة داخل صورة"
+      className="rounded border border-velvet-hi px-2 py-1 text-xs text-ivory hover:bg-velvet-hi"
+    >
+      ⧉
+    </button>
   );
 }
 

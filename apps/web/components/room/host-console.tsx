@@ -20,6 +20,9 @@ export function HostConsole({
   onToggleWaitForAll,
   onChangeVideo,
   onSwapToUpload,
+  subtitlesUrl,
+  onUploadSubtitles,
+  onClearSubtitles,
   onGrant,
   onDeny
 }: {
@@ -35,12 +38,16 @@ export function HostConsole({
   onToggleWaitForAll: () => void;
   onChangeVideo: (youtubeUrl: string) => void;
   onSwapToUpload: (videoId: string, fileUrl: string) => void;
+  subtitlesUrl: string | null;
+  onUploadSubtitles: (file: File) => Promise<void>;
+  onClearSubtitles: () => void;
   onGrant: (userId: string) => void;
   onDeny: (userId: string) => void;
 }) {
   const [url, setUrl] = useState("");
   const [busy, setBusy] = useState(false);
   const [uploadBusy, setUploadBusy] = useState(false);
+  const [subsBusy, setSubsBusy] = useState(false);
   const [error, setError] = useState("");
 
   function submit(event: React.FormEvent) {
@@ -129,6 +136,41 @@ export function HostConsole({
 
         <VideoPicker onUploaded={video => onSwapToUpload(video.videoId, video.fileUrl)} onBusyChange={setUploadBusy} />
         <VideoLibrary onPick={video => onSwapToUpload(video.id, video.fileUrl)} />
+
+        <div className="flex flex-wrap items-center gap-2 border-t border-velvet-hi pt-3">
+          <span className="text-sm text-ivory-dim">الترجمة:</span>
+          {subtitlesUrl ? (
+            <>
+              <span className="text-xs text-gold">مرفوعة ✓</span>
+              <Button size="sm" type="button" variant="ghost" onClick={onClearSubtitles}>
+                شيلها
+              </Button>
+            </>
+          ) : (
+            <label className="cursor-pointer rounded border border-gold/30 px-3 py-1.5 text-xs text-ivory hover:bg-gold/10">
+              {subsBusy ? "جارٍ الرفع..." : "ارفع ملف SRT أو VTT"}
+              <input
+                type="file"
+                accept=".srt,.vtt,text/vtt"
+                className="hidden"
+                onChange={async event => {
+                  const file = event.target.files?.[0];
+                  event.target.value = "";
+                  if (!file) return;
+                  setError("");
+                  setSubsBusy(true);
+                  try {
+                    await onUploadSubtitles(file);
+                  } catch (err: any) {
+                    setError(err?.message || "تعذر رفع الترجمة.");
+                  } finally {
+                    setSubsBusy(false);
+                  }
+                }}
+              />
+            </label>
+          )}
+        </div>
 
         {error && <FormError>{error}</FormError>}
       </div>

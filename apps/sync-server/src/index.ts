@@ -352,7 +352,9 @@ io.on("connection", rawSocket => {
         contentType: party.contentType,
         contentUrl: party.contentUrl,
         role: member.role,
-        isLocked: party.isLocked
+        isLocked: party.isLocked,
+        subtitlesUrl: party.subtitlesUrl,
+        rate: party.playbackRate
       });
       await emitQueue(partyId);
       publishReadiness(partyId);
@@ -547,6 +549,21 @@ io.on("connection", rawSocket => {
   socket.on("viewer:buffering", ({ partyId, isBuffering }) => {
     if (socket.partyId !== partyId) return;
     setBuffering(partyId, socket.userId!, socket.userName || "", !!isBuffering);
+  });
+
+  socket.on("control:rate", async ({ partyId, rate }) => {
+    if (!(await requireHost(socket, partyId))) return;
+    const clean = Number(rate);
+    if (![0.5, 0.75, 1, 1.25, 1.5, 2].includes(clean)) return;
+    const party = await prisma.party.update({ where: { id: partyId }, data: { playbackRate: clean } });
+    io.to(roomFor(partyId)).emit("party:rateChanged", { rate: party.playbackRate });
+  });
+
+  socket.on("party:subtitles", async ({ partyId, url }) => {
+    if (!(await requireHost(socket, partyId))) return;
+    const clean = typeof url === "string" && /^https?:\/\//.test(url) ? url.slice(0, 512) : null;
+    await prisma.party.update({ where: { id: partyId }, data: { subtitlesUrl: clean } });
+    io.to(roomFor(partyId)).emit("party:subtitlesChanged", { url: clean });
   });
 
   socket.on("party:waitForAll", async ({ partyId, enabled }) => {
