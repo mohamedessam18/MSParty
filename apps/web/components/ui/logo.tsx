@@ -8,10 +8,22 @@ import Link from "next/link";
  * grid with gaps wide enough to survive being four pixels across — three seats
  * that merge into one blob at favicon size are worth less than no mark at all.
  */
-export function Mark({ className = "", title }: { className?: string; title?: string }) {
+export function Mark({
+  className = "",
+  title,
+  size
+}: {
+  className?: string;
+  title?: string;
+  /** Explicit pixels, for renderers with no CSS — the share-card generator
+   *  sizes by attribute because Tailwind classes mean nothing to it. */
+  size?: number;
+}) {
   return (
     <svg
       viewBox="0 0 64 64"
+      width={size}
+      height={size}
       className={className}
       role={title ? "img" : "presentation"}
       aria-hidden={title ? undefined : true}

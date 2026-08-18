@@ -33,7 +33,7 @@ for (const file of STATIC) copyFileSync(`src/${file}`, `dist/${file}`);
 // broken extension.
 for (const size of ICONS) {
   const icon = `icons/icon-${size}.png`;
-  if (!existsSync(`src/${icon}`)) throw new Error(`${icon} is missing — run: node make-icons.mjs`);
+  if (!existsSync(`src/${icon}`)) throw new Error(`${icon} is missing — run: node ../../tools/draw.mjs`);
   copyFileSync(`src/${icon}`, `dist/${icon}`);
 }
 

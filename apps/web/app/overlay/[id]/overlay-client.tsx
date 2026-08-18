@@ -3,6 +3,7 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { io, Socket } from "socket.io-client";
 import { ChatPanel } from "@/components/room/chat-panel";
 import { Avatar } from "@/components/ui/avatar";
+import { Mark } from "@/components/ui/logo";
 import type { Member, Message } from "@/components/room/types";
 
 type SyncState = { isPlaying: boolean; timestamp: number; serverTime: number; role?: string };
@@ -120,8 +121,11 @@ export function OverlayClient({ partyId }: { partyId: string }) {
   return (
     <main className="flex h-screen flex-col bg-ink">
       <header className="flex items-center justify-between gap-2 border-b border-velvet-hi px-3 py-2.5">
-        <span className="display text-sm text-ivory">
-          MS<span className="text-gold">Party</span>
+        <span className="flex items-center gap-1.5">
+          <Mark className="h-5 w-5 text-gold" />
+          <span className="display text-sm text-ivory">
+            MS<span className="text-gold">Party</span>
+          </span>
         </span>
         <span className={`text-[11px] ${connected ? "text-gold" : "text-curtain"}`}>
           {connected ? (playing ? "● بتتفرجوا" : "متصل") : "بيحاول يوصل..."}

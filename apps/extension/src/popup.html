@@ -11,8 +11,9 @@
         background: #140a0d; color: #f2e8d5;
         font: 14px system-ui, "Segoe UI", sans-serif;
       }
-      .brand { font-weight: 700; font-size: 18px; letter-spacing: .02em; }
+      .brand { display: flex; align-items: center; gap: 8px; font-weight: 700; font-size: 18px; letter-spacing: .02em; }
       .brand span { color: #c9a227; }
+      .brand img { width: 26px; height: 26px; }
       .state {
         margin: 16px 0 0; padding: 12px;
         border: 1px solid #3d1c22; border-radius: 8px; background: #2d1418;
@@ -36,7 +37,7 @@
     </style>
   </head>
   <body>
-    <div class="brand">MS<span>Party</span></div>
+    <div class="brand"><img src="icons/icon-48.png" alt="" />MS<span>Party</span></div>
     <div id="state" class="state">بنشوف...</div>
     <p class="note">
       الإضافة بتزامن التشغيل بس. مابتقراش ولا بتنقل أي صورة أو صوت من الفيديو، وكل واحد بيتفرج باشتراكه.
