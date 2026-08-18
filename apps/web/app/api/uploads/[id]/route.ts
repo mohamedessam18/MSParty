@@ -4,7 +4,10 @@ import { NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
 import { requireDbUser } from "@/lib/current-user";
 import { deleteR2Object, r2Client } from "@/lib/r2";
-import { expectedParts } from "@/lib/upload-config";
+import { PART_SIZE, expectedParts } from "@/lib/upload-config";
+
+/** URLs are cheap but not free to sign; the client asks again for the rest. */
+const PRESIGN_BATCH = 200;
 
 export const dynamic = "force-dynamic";
 
@@ -17,12 +20,9 @@ async function ownedUpload(id: string) {
 }
 
 /**
- * Hands back presigned URLs for the parts still missing, and reports which parts
- * R2 already holds so they are not sent twice.
- *
- * Note this only skips parts within one upload session — the client starts a
- * fresh multipart upload on every attempt, so a page reload still begins again.
- * Surviving a reload would mean remembering the upload id in the browser.
+ * Reports what is still missing and signs URLs for it. R2 is the source of
+ * truth for progress, so a browser that has just been reloaded can pick an
+ * upload back up knowing only its id.
  */
 export async function POST(request: Request, { params }: { params: { id: string } }) {
   let video;
@@ -32,40 +32,44 @@ export async function POST(request: Request, { params }: { params: { id: string 
     const missing = error instanceof Error && error.message === "NOT_FOUND";
     return NextResponse.json({ message: missing ? "Not found" : "Unauthorized" }, { status: missing ? 404 : 401 });
   }
-  if (!video.multipartId) return NextResponse.json({ message: "Not a multipart upload" }, { status: 400 });
-
-  const { partNumbers } = await request.json();
-  if (!Array.isArray(partNumbers) || !partNumbers.length) {
-    return NextResponse.json({ message: "partNumbers required" }, { status: 400 });
+  if (!video.multipartId || video.status !== "pending") {
+    return NextResponse.json({ message: "الرفعة دي خلصت أو اتلغت." }, { status: 410 });
   }
 
   const client = r2Client();
   const listed = await client.send(
     new ListPartsCommand({ Bucket: process.env.R2_BUCKET, Key: video.storageKey, UploadId: video.multipartId })
   );
-  const uploaded = (listed.Parts || []).map(part => ({ partNumber: part.PartNumber!, eTag: part.ETag! }));
-  const have = new Set(uploaded.map(part => part.partNumber));
+  const have = new Set((listed.Parts || []).map(part => part.PartNumber!));
+
+  // The server works out what is missing from the recorded size, so a client
+  // that has just been reloaded needs to know nothing about its own progress.
+  const partCount = video.sizeBytes ? expectedParts(video.sizeBytes) : have.size;
+  const missing = Array.from({ length: partCount }, (_, index) => index + 1).filter(number => !have.has(number));
 
   const urls = await Promise.all(
-    partNumbers
-      .filter((number: number) => Number.isInteger(number) && number > 0 && !have.has(number))
-      .slice(0, 200)
-      .map(async (partNumber: number) => ({
-        partNumber,
-        url: await getSignedUrl(
-          client,
-          new UploadPartCommand({
-            Bucket: process.env.R2_BUCKET,
-            Key: video.storageKey,
-            UploadId: video.multipartId!,
-            PartNumber: partNumber
-          }),
-          { expiresIn: 3600 }
-        )
-      }))
+    missing.slice(0, PRESIGN_BATCH).map(async partNumber => ({
+      partNumber,
+      url: await getSignedUrl(
+        client,
+        new UploadPartCommand({
+          Bucket: process.env.R2_BUCKET,
+          Key: video.storageKey,
+          UploadId: video.multipartId!,
+          PartNumber: partNumber
+        }),
+        { expiresIn: 3600 }
+      )
+    }))
   );
 
-  return NextResponse.json({ urls, uploaded });
+  return NextResponse.json({
+    partSize: PART_SIZE,
+    partCount,
+    uploadedCount: have.size,
+    remaining: missing.length,
+    urls
+  });
 }
 
 /** Confirms the upload: stitches the parts and moves the row into the library. */

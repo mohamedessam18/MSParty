@@ -74,9 +74,36 @@ const PARALLEL_PARTS = 3;
 const PART_ATTEMPTS = 3;
 
 /**
- * Multipart upload with per-part retry and resume. R2 is asked which parts it
- * already holds, so an interrupted upload continues instead of restarting —
- * which is what made a failure at 90% so expensive before.
+ * Identifies a file well enough to match it against an interrupted upload
+ * without reading it: name, size and mtime together are as close as the browser
+ * lets us get to a fingerprint.
+ */
+const signatureOf = (file: File) => `msparty:upload:${file.name}:${file.size}:${file.lastModified}`;
+
+function rememberUpload(file: File, videoId: string) {
+  try {
+    localStorage.setItem(signatureOf(file), videoId);
+  } catch {
+    // Private mode or a full quota; resuming is a bonus, not a requirement.
+  }
+}
+function forgetUpload(file: File) {
+  try {
+    localStorage.removeItem(signatureOf(file));
+  } catch {}
+}
+function recallUpload(file: File) {
+  try {
+    return localStorage.getItem(signatureOf(file));
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * Multipart upload with per-part retry, cancellation, and resume that survives
+ * a reload: the id is kept in the browser and R2 is asked what it already
+ * holds, so an interrupted transfer continues instead of starting over.
  */
 export function uploadVideo(
   file: File,
@@ -93,45 +120,63 @@ export function uploadVideo(
   };
 
   const promise = (async () => {
-    const init = await fetch("/api/uploads", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ fileName: file.name, contentType: file.type, fileSize: file.size }),
-      signal: controller.signal
-    });
-    const started = await init.json().catch(() => ({}));
-    if (!init.ok) throw new Error(started.message || "تعذر تجهيز الرفع.");
+    /** Asks the server what is left; 410 means the saved id is stale. */
+    async function plan(videoId: string) {
+      const response = await fetch(`/api/uploads/${videoId}`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: "{}",
+        signal: controller.signal
+      });
+      if (response.status === 410 || response.status === 404) return null;
+      const data = await response.json().catch(() => ({}));
+      if (!response.ok) throw new Error(data.message || "تعذر تجهيز أجزاء الرفع.");
+      return data as { partSize: number; partCount: number; uploadedCount: number; remaining: number; urls: { partNumber: number; url: string }[] };
+    }
 
-    const { videoId, partSize, partCount } = started as { videoId: string; partSize: number; partCount: number };
-    const allParts = Array.from({ length: partCount }, (_, index) => index + 1);
+    async function start() {
+      const response = await fetch("/api/uploads", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ fileName: file.name, contentType: file.type, fileSize: file.size }),
+        signal: controller.signal
+      });
+      const data = await response.json().catch(() => ({}));
+      if (!response.ok) throw new Error(data.message || "تعذر تجهيز الرفع.");
+      return data.videoId as string;
+    }
 
-    const plan = await fetch(`/api/uploads/${videoId}`, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ partNumbers: allParts }),
-      signal: controller.signal
-    });
-    const planned = await plan.json().catch(() => ({}));
-    if (!plan.ok) throw new Error(planned.message || "تعذر تجهيز أجزاء الرفع.");
+    const remembered = recallUpload(file);
+    let videoId = remembered || (await start());
+    let planned = await plan(videoId);
+    if (!planned) {
+      // The remembered upload no longer exists; begin a fresh one.
+      forgetUpload(file);
+      videoId = await start();
+      planned = await plan(videoId);
+      if (!planned) throw new Error("تعذر تجهيز الرفع.");
+    }
+    rememberUpload(file, videoId);
 
-    const urls: { partNumber: number; url: string }[] = planned.urls;
-    const alreadyThere: number = (planned.uploaded || []).length;
-
+    const { partSize } = planned;
     const startedAt = Date.now();
-    let sent = alreadyThere * partSize;
+    // Bytes already in the bucket count as done, but not toward the rate: they
+    // were not sent in this session, so including them inflates the estimate.
+    const carried = Math.min(planned.uploadedCount * partSize, file.size);
+    let sentThisRun = 0;
     const partProgress = new Map<number, number>();
 
     const report = () => {
-      const total = file.size;
-      const done = Math.min(sent + [...partProgress.values()].reduce((a, b) => a + b, 0), total);
+      const live = [...partProgress.values()].reduce((a, b) => a + b, 0);
+      const done = Math.min(carried + sentThisRun + live, file.size);
       const elapsed = (Date.now() - startedAt) / 1000;
-      const rate = elapsed > 0 ? done / elapsed : 0;
+      const rate = elapsed > 0 ? (sentThisRun + live) / elapsed : 0;
       onProgress({
         sent: done,
-        total,
-        percent: Math.round((done / total) * 100),
+        total: file.size,
+        percent: Math.round((done / file.size) * 100),
         bytesPerSecond: rate,
-        secondsLeft: rate > 0 ? Math.max(0, (total - done) / rate) : 0
+        secondsLeft: rate > 0 ? Math.max(0, (file.size - done) / rate) : 0
       });
     };
     report();
@@ -150,7 +195,7 @@ export function uploadVideo(
           inFlight = inFlight.filter(item => item !== request);
           if (request.status >= 200 && request.status < 300) {
             partProgress.delete(part.partNumber);
-            sent += blob.size;
+            sentThisRun += blob.size;
             report();
             resolve();
           } else reject(new Error(`part ${part.partNumber} failed (${request.status})`));
@@ -163,28 +208,35 @@ export function uploadVideo(
         request.send(blob);
       });
 
-    const queue = [...urls];
-    const worker = async () => {
-      while (queue.length) {
-        if (controller.signal.aborted) throw new Error("aborted");
-        const part = queue.shift()!;
-        let lastError: unknown;
-        for (let attempt = 0; attempt < PART_ATTEMPTS; attempt++) {
-          try {
-            await sendPart(part);
-            lastError = null;
-            break;
-          } catch (error) {
-            lastError = error;
-            if (error instanceof Error && error.message === "aborted") throw error;
-            partProgress.delete(part.partNumber);
-            await new Promise(done => setTimeout(done, 500 * (attempt + 1)));
+    // The server signs a batch at a time, so keep asking until nothing is left.
+    let batch = planned;
+    while (batch.urls.length) {
+      const queue = [...batch.urls];
+      const worker = async () => {
+        while (queue.length) {
+          if (controller.signal.aborted) throw new Error("aborted");
+          const part = queue.shift()!;
+          let lastError: unknown;
+          for (let attempt = 0; attempt < PART_ATTEMPTS; attempt++) {
+            try {
+              await sendPart(part);
+              lastError = null;
+              break;
+            } catch (error) {
+              lastError = error;
+              if (error instanceof Error && error.message === "aborted") throw error;
+              partProgress.delete(part.partNumber);
+              await new Promise(done => setTimeout(done, 500 * (attempt + 1)));
+            }
           }
+          if (lastError) throw lastError;
         }
-        if (lastError) throw lastError;
-      }
-    };
-    await Promise.all(Array.from({ length: Math.min(PARALLEL_PARTS, queue.length) || 1 }, worker));
+      };
+      await Promise.all(Array.from({ length: Math.min(PARALLEL_PARTS, queue.length) || 1 }, worker));
+      const next = await plan(videoId);
+      if (!next) throw new Error("تعذر إنهاء الرفع.");
+      batch = next;
+    }
 
     const done = await fetch(`/api/uploads/${videoId}`, {
       method: "PUT",
@@ -193,6 +245,7 @@ export function uploadVideo(
     });
     const ready = await done.json().catch(() => ({}));
     if (!done.ok) throw new Error(ready.message || "تعذر إنهاء الرفع.");
+    forgetUpload(file);
     return { videoId, fileUrl: ready.fileUrl as string };
   })();
 
