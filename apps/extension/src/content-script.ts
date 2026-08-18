@@ -68,7 +68,49 @@ let adapter: Adapter | null = null;
 let room: RoomState | null = null;
 let isHost = false;
 
-type RoomState = { isPlaying: boolean; timestamp: number; serverTime: number; isHost?: boolean };
+type RoomState = {
+  isPlaying: boolean;
+  timestamp: number;
+  serverTime: number;
+  isHost?: boolean;
+  contentUrl?: string | null;
+};
+
+/** What the party is on, when the room has told us. */
+let expected: string | null = null;
+let lastVerdict: boolean | null = null;
+
+/**
+ * Whether two links are the same thing to watch.
+ *
+ * Compared without the query or the fragment: these services hang a profile,
+ * a locale and a tracking id off the same episode, so two people on the very
+ * same scene rarely hold identical URLs.
+ */
+function sameVideo(a: string, b: string) {
+  try {
+    const left = new URL(a);
+    const right = new URL(b);
+    return left.origin === right.origin && left.pathname.replace(/\/+$/, "") === right.pathname.replace(/\/+$/, "");
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * Tells the panel whether this tab is even on the right video.
+ *
+ * Synchronising a position between two different episodes is worse than not
+ * synchronising at all: everything looks like it is working, and everyone is
+ * watching something else.
+ */
+function checkPage(origin: string) {
+  if (!expected || !overlay?.contentWindow) return;
+  const matches = sameVideo(location.href, expected);
+  if (matches === lastVerdict) return;
+  lastVerdict = matches;
+  overlay.contentWindow.postMessage({ source: "msparty-extension", type: "page", matches, expected }, origin);
+}
 
 /**
  * Hangs the room over the page. Same origin as the website, so it carries its
@@ -133,6 +175,10 @@ function followFullscreen() {
 function apply(state: RoomState) {
   room = state;
   if (typeof state.isHost === "boolean") isHost = state.isHost;
+  // The host swapping the film mid-party arrives the same way the position
+  // does, so following them is the same check as never having been in the
+  // right place to begin with.
+  if (state.contentUrl) expected = state.contentUrl;
 
   const video = adapter?.video();
   if (!video || !adapter) return;
@@ -147,8 +193,14 @@ function apply(state: RoomState) {
       if (adapter.seek) adapter.seek(video, target);
       else video.currentTime = target;
     }
-    if (state.isPlaying) void video.play().catch(() => undefined);
-    else video.pause();
+    if (state.isPlaying) {
+      // A tab that has never been clicked in is not allowed to make noise, and
+      // the rejection is the only way to find out. Silently swallowing it
+      // leaves someone staring at a frozen frame with no idea why.
+      video.play().catch(() => tellPanel({ type: "autoplay-blocked" }));
+    } else {
+      video.pause();
+    }
   } finally {
     // Long enough for the service's player to settle and stop emitting.
     setTimeout(() => {
@@ -180,7 +232,9 @@ function report(kind: "play" | "pause" | "seek", seconds: number, origin: string
 }
 
 function watchPlayer(session: Session) {
-  let lastTime = 0;
+  // Null until the first event: starting at zero makes a video that resumes at
+  // an hour in look like an hour-long jump, which reads as a seek.
+  let lastTime: number | null = null;
 
   // Capturing listeners on the document: the <video> is replaced when the
   // service changes title, and rebinding to each new element would miss the
@@ -201,7 +255,7 @@ function watchPlayer(session: Session) {
     if (video?.tagName !== "VIDEO") return;
     // A jump larger than playback could account for is a seek. Ordinary
     // progress moves by well under a second per event.
-    if (!applying && Math.abs(video.currentTime - lastTime) > 2) {
+    if (!applying && lastTime !== null && Math.abs(video.currentTime - lastTime) > 2) {
       if (isHost) report("seek", video.currentTime, session.siteOrigin);
       else enforce();
     }
@@ -213,8 +267,18 @@ function watchPlayer(session: Session) {
     if (event.origin !== session.siteOrigin) return;
     const data = event.data;
     if (data?.source !== "msparty-overlay") return;
-    if (data.type === "state") apply(data.state);
+    if (data.type === "state") {
+      apply(data.state);
+      checkPage(session.siteOrigin);
+    }
     if (data.type === "leave") unmountOverlay();
+    // Following the room to another episode is a navigation the person asked
+    // for, from a button in our own panel — never something we do to them.
+    if (data.type === "navigate" && expected) location.href = expected;
+    if (data.type === "stop") {
+      chrome.runtime.sendMessage({ type: "stop" });
+      unmountOverlay();
+    }
     // Collapsed, the panel must stop covering the film. The iframe is opaque to
     // clicks whatever it draws, so the frame itself has to shrink.
     if (data.type === "resize" && overlay && typeof data.width === "number") {
@@ -236,12 +300,21 @@ function watchPlayer(session: Session) {
       if (video.paused === room.isPlaying || Math.abs(video.currentTime - target) > 1.5) enforce();
     }
 
+    // These services route between titles without a page load, so the answer
+    // can change under us at any moment.
+    checkPage(session.siteOrigin);
+
     if (video.paused) return;
     overlay.contentWindow.postMessage(
       { source: "msparty-extension", type: "position", seconds: video.currentTime },
       session.siteOrigin
     );
   }, 1000);
+}
+
+/** One-way note to the panel, for things it should say out loud. */
+function tellPanel(message: Record<string, unknown>) {
+  overlay?.contentWindow?.postMessage({ source: "msparty-extension", ...message }, "*");
 }
 
 /** Netflix's player is unreachable from here; this puts a relay in the page. */

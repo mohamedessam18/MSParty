@@ -7,7 +7,13 @@ import { REACTIONS, type FlyingReaction, type Member, type Message } from "@/com
 import { Avatar } from "@/components/ui/avatar";
 import { Mark } from "@/components/ui/logo";
 
-type SyncState = { isPlaying: boolean; timestamp: number; serverTime: number; role?: string };
+type SyncState = {
+  isPlaying: boolean;
+  timestamp: number;
+  serverTime: number;
+  role?: string;
+  contentUrl?: string | null;
+};
 
 /** What the content script sends us, and what we send back. */
 const TO_PAGE = "msparty-overlay";
@@ -38,6 +44,9 @@ export function OverlayClient({ partyId }: { partyId: string }) {
   const [role, setRole] = useState("viewer");
   const [playing, setPlaying] = useState(false);
   const [drift, setDrift] = useState(0);
+  /** Null until the page has told us; false means this tab is on something else. */
+  const [onRightVideo, setOnRightVideo] = useState<boolean | null>(null);
+  const [autoplayBlocked, setAutoplayBlocked] = useState(false);
   const [fault, setFault] = useState<string | null>(null);
   const [userId, setUserId] = useState("");
   const socket = useRef<Socket>();
@@ -163,6 +172,17 @@ export function OverlayClient({ partyId }: { partyId: string }) {
 
       if (event.data.type === "position") {
         localTime.current = event.data.seconds;
+        // Positions only arrive while something is playing, so one is proof
+        // the browser let go.
+        setAutoplayBlocked(false);
+        return;
+      }
+      if (event.data.type === "page") {
+        setOnRightVideo(event.data.matches);
+        return;
+      }
+      if (event.data.type === "autoplay-blocked") {
+        setAutoplayBlocked(true);
         return;
       }
       // Only the host's actions become the room's — and only the host sends
@@ -250,7 +270,37 @@ export function OverlayClient({ partyId }: { partyId: string }) {
         >
           ⟨
         </button>
+        <button
+          type="button"
+          onClick={() => toPage({ type: "stop" })}
+          aria-label="اقفل السهرة على المنصة دي"
+          title="اقفل السهرة"
+          className="rounded px-1.5 py-1 text-ivory-dim transition hover:bg-curtain/15 hover:text-curtain"
+        >
+          ✕
+        </button>
       </header>
+
+      {/* The most consequential thing this panel can say. A position synced
+          between two different episodes looks exactly like everything working. */}
+      {onRightVideo === false && (
+        <div className="border-b border-curtain/40 bg-curtain/10 px-3 py-2.5">
+          <p className="text-[11px] leading-5 text-curtain">إنت على حاجة تانية غير اللي الشلة بتتفرج عليها.</p>
+          <button
+            type="button"
+            onClick={() => toPage({ type: "navigate" })}
+            className="mt-1.5 w-full rounded border border-curtain/50 bg-curtain/10 py-1.5 text-[11px] text-curtain transition hover:bg-curtain/20"
+          >
+            وديني عندهم
+          </button>
+        </div>
+      )}
+
+      {autoplayBlocked && onRightVideo !== false && (
+        <p className="border-b border-gold/20 bg-gold/[.07] px-3 py-2 text-[11px] leading-5 text-gold">
+          متصفحك موقف التشغيل التلقائي. دوس تشغيل مرة واحدة وهو هيمشي مع الشلة لوحده بعد كده.
+        </p>
+      )}
 
       {/* Only shown when it is worth acting on. A permanent readout of a number
           that is almost always zero teaches people to stop reading it. */}
