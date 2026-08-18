@@ -4,6 +4,7 @@ import { authOptions } from "@/lib/auth";
 import { Button } from "@/components/ui/button";
 import { Kicker } from "@/components/ui/card";
 import { Rule, Wordmark } from "@/components/ui/wordmark";
+import { CinemaHero } from "@/components/cinema-hero";
 
 const steps = [
   { number: "01", title: "الهوست يفتح السهرة", copy: "يختار فيديو YouTube أو يرفع واحد، وياخد مكانه قدام الشاشة." },
@@ -28,39 +29,6 @@ function Header({ signedIn }: { signedIn: boolean }) {
         </Link>
       </nav>
     </header>
-  );
-}
-
-function ScreenPreview() {
-  return (
-    <div className="marquee-frame mx-auto w-full max-w-lg">
-      <div className="relative aspect-video overflow-hidden border border-gold/25 bg-gradient-to-b from-velvet to-ink-deep">
-        <div className="absolute inset-x-0 top-0 flex items-center justify-between p-3 text-xs">
-          <span className="rounded border border-gold/25 bg-ink/70 px-2.5 py-1.5 text-gold">ليلة فيلم الجمعة</span>
-          <span className="mono flex items-center gap-1.5 rounded bg-curtain/20 px-2.5 py-1.5 text-curtain">
-            <i className="animate-soft-pulse h-1.5 w-1.5 rounded-full bg-curtain" />
-            LIVE · 04
-          </span>
-        </div>
-        <div className="absolute inset-0 flex items-center justify-center">
-          <span className="flex h-16 w-16 items-center justify-center rounded-full border border-gold/40 bg-gold/10 text-2xl text-gold">
-            ▶
-          </span>
-        </div>
-      </div>
-      {/* The seat row: the whole point of the product, shown as the poster's subject. */}
-      <div className="-mt-4 flex justify-center gap-2 px-4">
-        {[
-          { label: "أنت · Host", tone: "bg-gold text-ink" },
-          { label: "سارة", tone: "bg-ivory text-ink" },
-          { label: "عمر", tone: "bg-velvet-hi text-ivory" }
-        ].map(seat => (
-          <span key={seat.label} className={`rounded border-2 border-ink px-2.5 py-1.5 text-xs font-bold ${seat.tone}`}>
-            {seat.label}
-          </span>
-        ))}
-      </div>
-    </div>
   );
 }
 
@@ -100,7 +68,7 @@ export default async function Home() {
           <p className="mt-4 text-xs text-ivory-dim/70">عندك رابط؟ افتحه وادخل مباشرة.</p>
         </div>
 
-        <ScreenPreview />
+        <CinemaHero />
       </section>
 
       <section className="border-t border-velvet-hi bg-ink-deep/50">
