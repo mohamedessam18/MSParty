@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
 import { requireDbUser } from "@/lib/current-user";
+import { notify } from "@/lib/notify";
 
 export const dynamic = "force-dynamic";
 
@@ -24,6 +25,7 @@ export async function POST(_: Request, { params }: { params: { id: string } }) {
     where: { id: row.id },
     data: { status: "accepted", respondedAt: new Date() }
   });
+  await notify({ userId: row.requesterId, type: "friend_accepted", actorId: user.id }).catch(() => undefined);
   return NextResponse.json({ status: "accepted" });
 }
 

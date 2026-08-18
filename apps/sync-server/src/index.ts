@@ -10,9 +10,33 @@ const prisma = new PrismaClient();
 const secret = new TextEncoder().encode(process.env.SYNC_TOKEN_SECRET || process.env.NEXTAUTH_SECRET);
 const origin = process.env.SYNC_SERVER_ORIGIN || "http://localhost:3000";
 
+const internalSecret = process.env.NEXTAUTH_SECRET || "";
+
 const httpServer = createServer((request, response) => {
   cors({ origin })(request, response, () => {
     if (request.url === "/health") { response.statusCode = 200; response.end("ok"); return; }
+
+    // The web app writes the notification, then asks us to hand it to whoever
+    // is connected. Shared-secret authorised: this must never be callable from
+    // a browser.
+    if (request.url === "/internal/notify" && request.method === "POST") {
+      if (!internalSecret || request.headers.authorization !== `Bearer ${internalSecret}`) {
+        response.statusCode = 401;
+        return response.end();
+      }
+      let body = "";
+      request.on("data", chunk => { body += chunk; if (body.length > 64_000) request.destroy(); });
+      request.on("end", () => {
+        try {
+          const { userId, notification } = JSON.parse(body);
+          if (userId) io.to(userRoom(userId)).emit("notification", notification);
+        } catch {}
+        response.statusCode = 204;
+        response.end();
+      });
+      return;
+    }
+
     response.statusCode = 404;
     response.end();
   });
@@ -84,6 +108,29 @@ function dropPresence(partyId: string, userId: string) {
 function setPresenceRole(partyId: string, userId: string, role: string) {
   const entry = presence.get(partyId)?.get(userId);
   if (entry) entry.role = role;
+}
+
+/**
+ * Presence across the whole site, not just inside one room. Friends need to
+ * know you are around before there is a party to be in.
+ */
+type Online = { sockets: number; partyId: string | null; partyName: string | null; invisible: boolean };
+const online = new Map<string, Online>();
+
+/** Tells a user's friends what changed about them. */
+async function publishOnline(userId: string) {
+  const entry = online.get(userId);
+  const friends = await prisma.friendship.findMany({
+    where: { status: "accepted", OR: [{ requesterId: userId }, { addresseeId: userId }] },
+    select: { requesterId: true, addresseeId: true }
+  });
+  const friendIds = friends.map(row => (row.requesterId === userId ? row.addresseeId : row.requesterId));
+  // Invisible reads exactly like offline to everyone else; the difference is
+  // only that this user still receives their own friends' updates.
+  const payload = entry && !entry.invisible
+    ? { userId, online: true, partyId: entry.partyId, partyName: entry.partyName }
+    : { userId, online: false, partyId: null, partyName: null };
+  for (const id of friendIds) io.to(userRoom(id)).emit("friend:presence", payload);
 }
 
 /** Cameras currently open per party, so the mesh cap can be enforced centrally. */
@@ -380,6 +427,47 @@ io.on("connection", rawSocket => {
   const socket = rawSocket as PartySocket;
   socket.join(userRoom(socket.userId!));
 
+  // Being connected at all is enough to count as online — a person browsing
+  // their dashboard is as present as one sitting in a room.
+  (async () => {
+    const me = await prisma.user.findUnique({ where: { id: socket.userId }, select: { invisible: true } });
+    const existing = online.get(socket.userId!);
+    online.set(socket.userId!, {
+      sockets: (existing?.sockets ?? 0) + 1,
+      partyId: existing?.partyId ?? null,
+      partyName: existing?.partyName ?? null,
+      invisible: !!me?.invisible
+    });
+    await publishOnline(socket.userId!);
+  })().catch(() => undefined);
+
+  /** Answers a dashboard asking which of its friends are around right now. */
+  socket.on("friends:watch", async () => {
+    const friends = await prisma.friendship.findMany({
+      where: { status: "accepted", OR: [{ requesterId: socket.userId }, { addresseeId: socket.userId }] },
+      select: { requesterId: true, addresseeId: true }
+    });
+    const friendIds = friends.map(row => (row.requesterId === socket.userId ? row.addresseeId : row.requesterId));
+    socket.emit("friends:presence", {
+      friends: friendIds
+        .map(id => ({ id, entry: online.get(id) }))
+        .filter(item => item.entry && !item.entry.invisible)
+        .map(item => ({
+          userId: item.id,
+          online: true,
+          partyId: item.entry!.partyId,
+          partyName: item.entry!.partyName
+        }))
+    });
+  });
+
+  socket.on("presence:invisible", async ({ invisible }) => {
+    const entry = online.get(socket.userId!);
+    if (entry) entry.invisible = !!invisible;
+    await prisma.user.update({ where: { id: socket.userId }, data: { invisible: !!invisible } }).catch(() => undefined);
+    await publishOnline(socket.userId!);
+  });
+
   socket.on("join-party", async ({ partyId }: { partyId: string }) => {
     try {
       const member = await memberFor(socket, partyId);
@@ -406,6 +494,12 @@ io.on("connection", rawSocket => {
       });
       await emitQueue(partyId);
       publishReadiness(partyId);
+      const entry = online.get(socket.userId!);
+      if (entry) {
+        entry.partyId = partyId;
+        entry.partyName = party.name;
+        publishOnline(socket.userId!).catch(() => undefined);
+      }
       addPresence(partyId, socket.userId!, {
         name: socket.userName || "",
         avatarUrl: dbUser?.avatarUrl ?? null,
@@ -687,6 +781,16 @@ io.on("connection", rawSocket => {
   });
 
   socket.on("disconnect", () => {
+    if (socket.userId) {
+      const entry = online.get(socket.userId);
+      if (entry) {
+        entry.sockets -= 1;
+        // Another tab still open means still here.
+        if (entry.sockets <= 0) online.delete(socket.userId);
+        else if (entry.partyId === socket.partyId) entry.partyId = null;
+        publishOnline(socket.userId).catch(() => undefined);
+      }
+    }
     if (!socket.partyId || !socket.userId) return;
     socket.to(voiceRoom(socket.partyId)).emit("voice:peerLeft", { socketId: socket.id });
     setBuffering(socket.partyId, socket.userId, socket.userName || "", false);

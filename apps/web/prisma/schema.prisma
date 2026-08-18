@@ -17,6 +17,8 @@ model User {
   // How people find each other. Null until chosen, and never set for guests —
   // a guest session cannot be signed back into, so being findable is pointless.
   username String? @unique
+  // Appear offline to friends without leaving the network.
+  invisible Boolean @default(false)
   name String
   avatarUrl String?
   createdAt DateTime @default(now())
@@ -28,6 +30,63 @@ model User {
   queueVotes QueueVote[]
   sentRequests Friendship[] @relation("FriendRequester")
   receivedRequests Friendship[] @relation("FriendAddressee")
+  notifications Notification[] @relation("NotificationOwner")
+  actedNotifications Notification[] @relation("NotificationActor")
+  invitesReceived PartyInvite[] @relation("InviteTo")
+  invitesSent PartyInvite[] @relation("InviteFrom")
+  blocksMade Block[] @relation("Blocker")
+  blocksAgainst Block[] @relation("Blocked")
+}
+
+// Blocking has to exist the moment strangers can send requests: without it the
+// only remedy for harassment is deleting the account.
+model Block {
+  id String @id @default(cuid())
+  blockerId String
+  blocker User @relation("Blocker", fields: [blockerId], references: [id], onDelete: Cascade)
+  blockedId String
+  blocked User @relation("Blocked", fields: [blockedId], references: [id], onDelete: Cascade)
+  createdAt DateTime @default(now())
+
+  @@unique([blockerId, blockedId])
+  @@index([blockedId])
+}
+
+// An invitation to a specific person, which is the only way into a private
+// party. Kept after it is answered so a declined invite is not silently resent.
+model PartyInvite {
+  id String @id @default(cuid())
+  partyId String
+  party Party @relation(fields: [partyId], references: [id], onDelete: Cascade)
+  invitedId String
+  invited User @relation("InviteTo", fields: [invitedId], references: [id], onDelete: Cascade)
+  invitedById String
+  invitedBy User @relation("InviteFrom", fields: [invitedById], references: [id], onDelete: Cascade)
+  // pending | accepted | declined
+  status String @default("pending")
+  createdAt DateTime @default(now())
+
+  @@unique([partyId, invitedId])
+  @@index([invitedId, status])
+}
+
+// Persisted so an invite sent while someone is offline is still waiting when
+// they return; live delivery over the socket is an optimisation on top.
+model Notification {
+  id String @id @default(cuid())
+  userId String
+  user User @relation("NotificationOwner", fields: [userId], references: [id], onDelete: Cascade)
+  // friend_request | friend_accepted | party_invite | friend_live
+  type String
+  actorId String?
+  actor User? @relation("NotificationActor", fields: [actorId], references: [id], onDelete: Cascade)
+  partyId String?
+  body String?
+  readAt DateTime?
+  createdAt DateTime @default(now())
+
+  @@index([userId, readAt])
+  @@index([userId, createdAt])
 }
 
 // One row per pair, holding both the pending request and the settled
@@ -59,8 +118,10 @@ model Party {
   currentTimestamp Float @default(0)
   isPlaying Boolean @default(false)
   isLocked Boolean @default(false)
-  // Lets the host's friends walk in without a code.
-  friendsOnly Boolean @default(false)
+  // private  — invited people only
+  // friends  — any friend of the host, no code needed
+  // code     — anyone holding the code or link
+  visibility String @default("code")
   // Shared so everyone reads the same cues at the same speed.
   subtitlesUrl String?
   playbackRate Float @default(1)
@@ -69,6 +130,7 @@ model Party {
   members PartyMember[]
   messages ChatMessage[]
   queue QueueItem[]
+  invites PartyInvite[]
   uploadedVideo UploadedVideo?
 }
 model QueueItem {

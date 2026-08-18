@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
 import { requireDbUser } from "@/lib/current-user";
 import { friendshipBetween, normalizeUsername } from "@/lib/friends";
+import { notify } from "@/lib/notify";
 
 export const dynamic = "force-dynamic";
 
@@ -56,6 +57,19 @@ export async function POST(request: Request) {
   if (!target) return NextResponse.json({ message: "مفيش حد بالاسم ده." }, { status: 404 });
   if (target.id === user.id) return NextResponse.json({ message: "ده إنت 🙂" }, { status: 400 });
 
+  // A block is silent in both directions: the blocked person learns nothing,
+  // and the blocker is not asked to explain themselves.
+  const blocked = await prisma.block.findFirst({
+    where: {
+      OR: [
+        { blockerId: user.id, blockedId: target.id },
+        { blockerId: target.id, blockedId: user.id }
+      ]
+    },
+    select: { id: true }
+  });
+  if (blocked) return NextResponse.json({ message: "مفيش حد بالاسم ده." }, { status: 404 });
+
   const existing = await friendshipBetween(user.id, target.id);
   if (existing?.status === "accepted") {
     return NextResponse.json({ message: "إنتوا أصدقاء بالفعل." }, { status: 409 });
@@ -68,11 +82,13 @@ export async function POST(request: Request) {
         where: { id: existing.id },
         data: { status: "accepted", respondedAt: new Date() }
       });
+      await notify({ userId: target.id, type: "friend_accepted", actorId: user.id }).catch(() => undefined);
       return NextResponse.json({ status: "accepted", user: target });
     }
     return NextResponse.json({ message: "بعتّ طلب بالفعل ومستني الرد." }, { status: 409 });
   }
 
   await prisma.friendship.create({ data: { requesterId: user.id, addresseeId: target.id } });
+  await notify({ userId: target.id, type: "friend_request", actorId: user.id }).catch(() => undefined);
   return NextResponse.json({ status: "pending", user: target }, { status: 201 });
 }

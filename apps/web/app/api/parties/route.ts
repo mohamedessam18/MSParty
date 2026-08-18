@@ -3,6 +3,9 @@ import { NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
 import { requireDbUser, requireUser } from "@/lib/current-user";
 import { generatePartyCode } from "@/lib/party-code";
+import { VISIBILITIES, type Visibility } from "@/lib/party-access";
+import { friendIdsOf } from "@/lib/friends";
+import { notifyFriendsLive } from "@/lib/notify";
 
 export async function GET() {
   try {
@@ -32,7 +35,8 @@ export async function POST(request: Request) {
     return NextResponse.json({ message: "لازم تعمل حساب عشان تستضيف بارتي." }, { status: 403 });
   }
 
-  const { name, contentType, contentUrl, uploadedVideoId } = await request.json();
+  const { name, contentType, contentUrl, uploadedVideoId, visibility } = await request.json();
+  const access: Visibility = VISIBILITIES.includes(visibility) ? visibility : "code";
   if (!name?.trim() || !["youtube", "upload"].includes(contentType) || (contentType === "upload" && !uploadedVideoId)) {
     return NextResponse.json({ message: "Invalid party" }, { status: 400 });
   }
@@ -48,6 +52,7 @@ export async function POST(request: Request) {
             data: {
               name: name.trim().slice(0, 80),
               code: generatePartyCode(),
+              visibility: access,
               contentType,
               contentUrl,
               hostId: user.id,
@@ -63,6 +68,12 @@ export async function POST(request: Request) {
           }
           return created;
         });
+        // Friends hear about a room they can actually walk into; a private or
+        // code-only one is nobody's business until they are invited.
+        if (access === "friends") {
+          const friendIds = await friendIdsOf(user.id);
+          await notifyFriendsLive(user.id, friendIds, party.id, party.name).catch(() => undefined);
+        }
         return NextResponse.json(party, { status: 201 });
       } catch (error) {
         const isCodeClash =

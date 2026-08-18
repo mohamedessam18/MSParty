@@ -16,6 +16,7 @@ export default function CreateParty() {
   const router = useRouter();
   const [name, setName] = useState("");
   const [contentType, setContentType] = useState<"youtube" | "upload">("youtube");
+  const [visibility, setVisibility] = useState<"private" | "friends" | "code">("friends");
   const [contentUrl, setContentUrl] = useState("");
   const [chosen, setChosen] = useState<Chosen | null>(null);
   const [uploadBusy, setUploadBusy] = useState(false);
@@ -50,7 +51,8 @@ export default function CreateParty() {
           name,
           contentType,
           contentUrl: contentType === "upload" ? chosen!.fileUrl : contentUrl,
-          uploadedVideoId: contentType === "upload" ? chosen!.videoId : undefined
+          uploadedVideoId: contentType === "upload" ? chosen!.videoId : undefined,
+          visibility
         })
       });
       const data = await response.json().catch(() => ({}));
@@ -135,6 +137,30 @@ export default function CreateParty() {
                 <VideoLibrary refreshKey={libraryKey} onPick={takeFromLibrary} />
               </div>
             )}
+
+            <fieldset>
+              <legend className="text-sm text-ivory-dim">مين يقدر يدخل؟</legend>
+              <div className="mt-2 space-y-2">
+                {[
+                  { value: "friends" as const, title: "أصدقائي", hint: "بيشوفوها في صفحتهم ويدخلوا من غير كود" },
+                  { value: "private" as const, title: "بالدعوة بس", hint: "اللي تدعوه بنفسك، ومحدش غيره" },
+                  { value: "code" as const, title: "أي حد معاه الكود", hint: "زي الرابط العادي — مناسب لناس مش على المنصة" }
+                ].map(option => (
+                  <button
+                    key={option.value}
+                    type="button"
+                    aria-pressed={visibility === option.value}
+                    onClick={() => setVisibility(option.value)}
+                    className={`block w-full rounded-lg border p-3 text-right transition ${
+                      visibility === option.value ? "border-gold bg-gold/10" : "border-velvet-hi hover:border-gold/40"
+                    }`}
+                  >
+                    <b className="block text-sm text-ivory">{option.title}</b>
+                    <span className="mt-0.5 block text-xs text-ivory-dim">{option.hint}</span>
+                  </button>
+                ))}
+              </div>
+            </fieldset>
 
             {error && <FormError>{error}</FormError>}
 
