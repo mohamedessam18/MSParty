@@ -36,6 +36,23 @@ model User {
   invitesSent PartyInvite[] @relation("InviteFrom")
   blocksMade Block[] @relation("Blocker")
   blocksAgainst Block[] @relation("Blocked")
+  pushSubscriptions PushSubscription[]
+}
+
+// One row per browser, not per person: someone with a phone and a laptop wants
+// the notice on whichever they are holding.
+model PushSubscription {
+  id String @id @default(cuid())
+  userId String
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+  endpoint String @unique
+  p256dh String
+  auth String
+  userAgent String?
+  createdAt DateTime @default(now())
+  lastUsedAt DateTime @default(now())
+
+  @@index([userId])
 }
 
 // Blocking has to exist the moment strangers can send requests: without it the

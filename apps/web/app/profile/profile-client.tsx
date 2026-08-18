@@ -8,6 +8,7 @@ import { Card, Kicker } from "@/components/ui/card";
 import { Field, FormError, Input } from "@/components/ui/input";
 import { Rule, Wordmark } from "@/components/ui/wordmark";
 import { VideoLibrary } from "@/components/video-library";
+import { PushToggle } from "@/components/push-toggle";
 import { FriendsPanel } from "./friends-panel";
 
 export type Profile = {
@@ -168,6 +169,13 @@ export function ProfileClient({ initial, stats }: { initial: Profile; stats: { p
             {saving ? "جارٍ الحفظ..." : "احفظ"}
           </Button>
         </form>
+      </Card>
+
+      <Card className="mt-6 p-5">
+        <Kicker>الإشعارات</Kicker>
+        <div className="mt-3">
+          <PushToggle />
+        </div>
       </Card>
 
       <section className="mt-6">
