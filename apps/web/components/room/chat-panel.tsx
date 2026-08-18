@@ -55,9 +55,17 @@ export function ChatPanel({
           messages.map((entry, index) => (
             <article key={`${entry.sentAt}-${index}`} className="animate-message-in flex gap-2 text-sm">
               <Avatar name={entry.name} src={entry.avatarUrl} size="sm" />
-              <p className="rounded-lg rounded-tr-sm bg-velvet-hi px-3 py-2 text-ivory">
-                <b className="ml-1.5 text-gold">{entry.userId === userId ? "أنت" : entry.name}</b>
-                {entry.message}
+              <p
+                className={`rounded-lg rounded-tr-sm px-3 py-2 ${
+                  entry.message ? "bg-velvet-hi text-ivory" : "bg-velvet/60 italic text-ivory-dim"
+                }`}
+              >
+                <b className={`ml-1.5 ${entry.userId ? "text-gold" : "text-ivory-dim"}`}>
+                  {entry.userId && entry.userId === userId ? "أنت" : entry.name}
+                </b>
+                {/* An erased author leaves the row and loses the words. Saying
+                    so beats an empty bubble that reads as a rendering bug. */}
+                {entry.message || "الرسالة اتشالت"}
               </p>
             </article>
           ))

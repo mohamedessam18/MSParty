@@ -3,6 +3,7 @@ import { prisma } from "@/lib/prisma";
 import { abortMultipart, deleteR2Object } from "@/lib/r2";
 import { pruneHistory } from "@/lib/history";
 import { releaseExpiredHolds } from "@/lib/username-claim";
+import { accountsDueForErasure, eraseAccount } from "@/lib/account-deletion";
 
 export const dynamic = "force-dynamic";
 
@@ -28,5 +29,17 @@ export async function GET(request: Request) {
     releaseExpiredHolds().catch(() => ({ count: 0 }))
   ]);
 
-  return NextResponse.json({ deleted: deleted.length, history: history.count, holds: holds.count });
+  // Accounts whose thirty days are up. One at a time and never in a batch
+  // transaction: each one touches storage, and a failure on one must not stop
+  // the rest or leave a half-erased account behind.
+  let erased = 0;
+  for (const account of await accountsDueForErasure()) {
+    try {
+      if (await eraseAccount(account.id)) erased++;
+    } catch (error) {
+      console.error("Erase failed for", account.id, error);
+    }
+  }
+
+  return NextResponse.json({ deleted: deleted.length, history: history.count, holds: holds.count, erased });
 }

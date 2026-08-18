@@ -444,6 +444,16 @@ io.use(async (socket, next) => {
     const { userToken } = socket.handshake.auth as { userToken?: string };
     if (!userToken) throw new Error("Missing user token");
     const user = await tokenUser(userToken);
+
+    // An account on its way out is hidden from the moment it asks to be. The
+    // token stays valid for its full life, so without this check the person is
+    // still in everyone's rooms and presence lists for the next thirty days.
+    const account = await prisma.user.findUnique({
+      where: { id: user.id },
+      select: { deletionRequestedAt: true }
+    });
+    if (!account || account.deletionRequestedAt) throw new Error("Account unavailable");
+
     (socket as PartySocket).userId = user.id;
     (socket as PartySocket).userName = user.name;
     next();

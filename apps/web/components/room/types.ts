@@ -1,5 +1,7 @@
 export type Member = { id: string; name: string; avatarUrl?: string | null; role: string; isGuest?: boolean };
-export type Message = { userId: string; name: string; message: string; sentAt: string; avatarUrl?: string | null };
+/** userId is null once the author has erased their account; the line stays so
+ *  the conversation around it still reads, but it points at nobody. */
+export type Message = { userId: string | null; name: string; message: string; sentAt: string; avatarUrl?: string | null };
 export type QueueItem = {
   id: string;
   title: string;

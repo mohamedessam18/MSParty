@@ -13,9 +13,19 @@ export async function requireUser() {
   return { id, ...session!.user };
 }
 
+/**
+ * The signed-in account, refusing one that is scheduled for erasure.
+ *
+ * "Hidden immediately" has to mean something: without this the account keeps
+ * hosting, chatting and appearing in other people's rooms for a month after
+ * being told it was gone. The deletion routes deliberately do not use this —
+ * they are the only thing such an account still needs to reach.
+ */
 export async function requireDbUser() {
   const { id } = await requireUser();
-  return prisma.user.findUniqueOrThrow({ where: { id } });
+  const user = await prisma.user.findUniqueOrThrow({ where: { id } });
+  if (user.deletionRequestedAt) throw new Error("PENDING_DELETION");
+  return user;
 }
 
 /**

@@ -24,6 +24,9 @@ model User {
   usernameChangedAt DateTime?
   // Appear offline to friends without leaving the network.
   invisible Boolean @default(false)
+  // When erasure was asked for. The account is hidden from that moment and
+  // erased once the grace period is up; signing back in before then cancels it.
+  deletionRequestedAt DateTime?
   name String
   avatarUrl String?
   createdAt DateTime @default(now())
@@ -281,8 +284,13 @@ model ChatMessage {
   id String @id @default(cuid())
   partyId String
   party Party @relation(fields: [partyId], references: [id], onDelete: Cascade)
-  userId String
-  user User @relation(fields: [userId], references: [id])
+  // Null once the author erases their account. The row stays so the rest of the
+  // conversation still reads in order, but nothing in it points at a person any
+  // more, and the text itself is blanked at the same time.
+  userId String?
+  user User? @relation(fields: [userId], references: [id], onDelete: SetNull)
   message String
   sentAt DateTime @default(now())
+
+  @@index([partyId, sentAt])
 }

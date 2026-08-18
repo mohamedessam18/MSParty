@@ -11,6 +11,7 @@ import { VideoLibrary } from "@/components/video-library";
 import { PushToggle } from "@/components/push-toggle";
 import { UsernameField } from "@/components/username-field";
 import { FriendsPanel } from "./friends-panel";
+import { DeleteAccount } from "./delete-account";
 
 export type Profile = {
   id: string;
@@ -182,6 +183,8 @@ export function ProfileClient({ initial, stats }: { initial: Profile; stats: { p
 
       <section className="mt-6">
         <FriendsPanel canUseFriends={!!me.username && !me.isGuest} />
+
+        <DeleteAccount />
       </section>
 
       <Card className="mt-6 p-5">
