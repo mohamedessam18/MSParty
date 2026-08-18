@@ -1,11 +1,8 @@
 import { prisma } from "./prisma";
 
-/** Lowercase, 3–20, letters/digits/underscore. Shown to people, so keep it plain. */
-export const USERNAME_PATTERN = /^[a-z0-9_]{3,20}$/;
-
-export function normalizeUsername(input: string) {
-  return input.trim().toLowerCase().replace(/^@/, "");
-}
+// Username shape and normalisation live in lib/username.ts; re-exported here
+// so callers that only care about friends do not have to know that.
+export { normalizeUsername } from "./username";
 
 /** Ids of everyone the user has an accepted friendship with, in either direction. */
 export async function friendIdsOf(userId: string) {

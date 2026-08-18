@@ -6,10 +6,12 @@ import { Button } from "@/components/ui/button";
 import { Card, Kicker } from "@/components/ui/card";
 import { Field, FormError, Input } from "@/components/ui/input";
 import { Rule, Wordmark } from "@/components/ui/wordmark";
+import { UsernameField } from "@/components/username-field";
 
 export function RegisterForm() {
   const router = useRouter();
   const [name, setName] = useState("");
+  const [username, setUsername] = useState("");
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [error, setError] = useState("");
@@ -26,11 +28,16 @@ export function RegisterForm() {
       setLoading(false);
       return;
     }
+    if (!username) {
+      setError("اختار اسم مستخدم — أصحابك هيلاقوك بيه.");
+      setLoading(false);
+      return;
+    }
     try {
       const response = await fetch("/api/auth/register", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ name: cleanName, email: cleanEmail, password })
+        body: JSON.stringify({ name: cleanName, email: cleanEmail, password, username })
       });
       if (!response.ok) {
         const data = await response.json().catch(() => ({}));
@@ -55,6 +62,7 @@ export function RegisterForm() {
           <Field label="الاسم">
             <Input required value={name} onChange={event => setName(event.target.value)} />
           </Field>
+          <UsernameField value={username} onChange={setUsername} />
           <Field label="البريد الإلكتروني">
             <Input required type="email" dir="ltr" value={email} onChange={event => setEmail(event.target.value)} />
           </Field>

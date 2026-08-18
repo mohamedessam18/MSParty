@@ -2,7 +2,7 @@ import { NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
 import { requireUser } from "@/lib/current-user";
 import { deleteR2Object, storageKeyFrom } from "@/lib/r2";
-import { USERNAME_PATTERN, normalizeUsername } from "@/lib/friends";
+import { claimUsername } from "@/lib/username-claim";
 
 // Per-user response; never let it sit in a shared cache.
 export const dynamic = "force-dynamic";
@@ -25,22 +25,14 @@ export async function PATCH(request: Request) {
     const { id } = await requireUser();
     const { name, avatarUrl, username } = await request.json();
 
-    const data: { name?: string; avatarUrl?: string | null; username?: string } = {};
+    const data: { name?: string; avatarUrl?: string | null } = {};
     if (typeof name === "string" && name.trim()) data.name = name.trim().slice(0, 50);
 
-    if (username !== undefined) {
-      const clean = normalizeUsername(String(username || ""));
-      if (!USERNAME_PATTERN.test(clean)) {
-        return NextResponse.json(
-          { message: "اسم المستخدم: 3 لـ 20 حرف إنجليزي صغير أو رقم أو _" },
-          { status: 400 }
-        );
-      }
-      const taken = await prisma.user.findUnique({ where: { username: clean }, select: { id: true } });
-      if (taken && taken.id !== id) {
-        return NextResponse.json({ message: "الاسم ده محجوز." }, { status: 409 });
-      }
-      data.username = clean;
+    if (username !== undefined && String(username).trim()) {
+      // Claiming carries the cooldown and the hold on the old name, so it runs
+      // as its own step rather than as a field on the update below.
+      const claim = await claimUsername(id, String(username));
+      if (!claim.ok) return NextResponse.json({ message: claim.message }, { status: claim.status });
     }
 
     if (avatarUrl !== undefined) {

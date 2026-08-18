@@ -9,6 +9,7 @@ import { Field, FormError, Input } from "@/components/ui/input";
 import { Rule, Wordmark } from "@/components/ui/wordmark";
 import { VideoLibrary } from "@/components/video-library";
 import { PushToggle } from "@/components/push-toggle";
+import { UsernameField } from "@/components/username-field";
 import { FriendsPanel } from "./friends-panel";
 
 export type Profile = {
@@ -146,15 +147,16 @@ export function ProfileClient({ initial, stats }: { initial: Profile; stats: { p
             <Input required value={name} onChange={event => setName(event.target.value)} />
           </Field>
 
-          <Field label="اسم المستخدم" hint="أصحابك بيلاقوك بيه · 3 لـ 20 حرف إنجليزي صغير أو رقم أو _">
-            <Input
-              dir="ltr"
-              placeholder="username"
-              value={username}
-              onChange={event => setUsername(event.target.value.toLowerCase().replace(/[^a-z0-9_]/g, ""))}
-              disabled={me.isGuest}
-            />
-          </Field>
+          <UsernameField
+            value={username}
+            onChange={setUsername}
+            disabled={me.isGuest}
+            hint={
+              me.username
+                ? "تقدر تغيّره مرة كل 30 يوم — والاسم القديم بيتحجزلك نفس المدة."
+                : "أصحابك بيلاقوك بيه. تقدر تغيّره مرة كل 30 يوم بعد كده."
+            }
+          />
 
           {me.email && (
             <p className="text-xs text-ivory-dim">

@@ -17,6 +17,11 @@ model User {
   // How people find each other. Null until chosen, and never set for guests —
   // a guest session cannot be signed back into, so being findable is pointless.
   username String? @unique
+  // The impersonation-proof form of the name: dots and underscores stripped and
+  // look-alike characters folded. Unique, so the database — not a racy
+  // check-then-insert — is what stops two people claiming the same shape.
+  usernameCanonical String? @unique
+  usernameChangedAt DateTime?
   // Appear offline to friends without leaving the network.
   invisible Boolean @default(false)
   name String
@@ -37,6 +42,21 @@ model User {
   blocksMade Block[] @relation("Blocker")
   blocksAgainst Block[] @relation("Blocked")
   pushSubscriptions PushSubscription[]
+  usernameHolds UsernameHold[]
+}
+
+// A released name is parked rather than freed, so nobody can pick up an
+// identity the moment its owner steps away from it.
+model UsernameHold {
+  id String @id @default(cuid())
+  username String @unique
+  canonical String @unique
+  userId String
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+  heldUntil DateTime
+  createdAt DateTime @default(now())
+
+  @@index([heldUntil])
 }
 
 // One row per browser, not per person: someone with a phone and a laptop wants
