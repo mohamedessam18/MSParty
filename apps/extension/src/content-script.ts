@@ -53,39 +53,62 @@ let overlay: HTMLIFrameElement | null = null;
 let applying = false;
 let adapter: Adapter | null = null;
 
-/** Hangs the room over the page. Same origin as the website, so it carries its
- *  own socket and needs nothing from us but a position. */
+/**
+ * Hangs the room over the page. Same origin as the website, so it carries its
+ * own socket and needs nothing from us but a position.
+ *
+ * It floats rather than pushing the page aside. Every one of these services
+ * lays its player out with fixed positioning against the viewport, so shifting
+ * the document moves the chrome and leaves the video where it was — the first
+ * version did exactly that.
+ */
 function mountOverlay(session: Session) {
   if (overlay) return;
 
   const frame = document.createElement("iframe");
   frame.src = `${session.siteOrigin}/overlay/${session.partyId}?token=${encodeURIComponent(session.token)}`;
   frame.setAttribute("allow", "camera; microphone; autoplay");
+  // Right-hand side: the page is for an Arabic audience reading right to left,
+  // and every one of these players puts its own controls bottom-left.
   frame.style.cssText = [
     "position:fixed",
     "top:0",
-    "left:0",
+    "right:0",
+    "left:auto",
     "width:340px",
     "height:100vh",
     "border:0",
+    "margin:0",
+    "padding:0",
     "z-index:2147483647",
     "color-scheme:dark"
   ].join(";");
 
-  // The services all render full-bleed, so the page has to give the panel room
-  // rather than sit under it.
-  document.documentElement.style.setProperty("margin-left", "340px", "important");
-  document.documentElement.style.setProperty("width", "calc(100% - 340px)", "important");
-
   document.documentElement.appendChild(frame);
   overlay = frame;
+  followFullscreen();
 }
 
 function unmountOverlay() {
   overlay?.remove();
   overlay = null;
-  document.documentElement.style.removeProperty("margin-left");
-  document.documentElement.style.removeProperty("width");
+}
+
+/**
+ * Keeps the panel visible when the player goes fullscreen.
+ *
+ * Only the fullscreen element and its descendants are painted, so a panel
+ * parented to <html> simply vanishes — which is precisely when people are
+ * watching. Re-parenting reloads the iframe, and the overlay keeps its chat in
+ * sessionStorage for that reason; there is no way to move an iframe without
+ * reloading it.
+ */
+function followFullscreen() {
+  document.addEventListener("fullscreenchange", () => {
+    if (!overlay) return;
+    const target = document.fullscreenElement ?? document.documentElement;
+    if (!target.contains(overlay)) target.appendChild(overlay);
+  });
 }
 
 /** Where the room says everyone should be, in seconds. */
@@ -115,9 +138,11 @@ function apply(state: { isPlaying: boolean; timestamp: number; serverTime: numbe
 
 /** Tells the room what the person watching just did. Host-only; the overlay
  *  decides whether to forward it. */
-function report(kind: "play" | "pause" | "seek", seconds: number) {
+function report(kind: "play" | "pause" | "seek", seconds: number, origin: string) {
   if (applying || !overlay?.contentWindow) return;
-  overlay.contentWindow.postMessage({ source: "msparty-extension", type: "control", kind, seconds }, "*");
+  // Targeted at our own origin rather than "*": the message says what someone
+  // is watching and when, and a wildcard hands that to whatever else is framed.
+  overlay.contentWindow.postMessage({ source: "msparty-extension", type: "control", kind, seconds }, origin);
 }
 
 function watchPlayer(session: Session) {
@@ -128,12 +153,12 @@ function watchPlayer(session: Session) {
   // gap. Media events do not bubble, but they do capture.
   document.addEventListener("play", event => {
     const video = event.target as HTMLVideoElement;
-    if (video?.tagName === "VIDEO") report("play", video.currentTime);
+    if (video?.tagName === "VIDEO") report("play", video.currentTime, session.siteOrigin);
   }, true);
 
   document.addEventListener("pause", event => {
     const video = event.target as HTMLVideoElement;
-    if (video?.tagName === "VIDEO") report("pause", video.currentTime);
+    if (video?.tagName === "VIDEO") report("pause", video.currentTime, session.siteOrigin);
   }, true);
 
   document.addEventListener("timeupdate", event => {
@@ -141,7 +166,7 @@ function watchPlayer(session: Session) {
     if (video?.tagName !== "VIDEO") return;
     // A jump larger than playback could account for is a seek. Ordinary
     // progress moves by well under a second per event.
-    if (Math.abs(video.currentTime - lastTime) > 2) report("seek", video.currentTime);
+    if (Math.abs(video.currentTime - lastTime) > 2) report("seek", video.currentTime, session.siteOrigin);
     lastTime = video.currentTime;
   }, true);
 
@@ -152,7 +177,23 @@ function watchPlayer(session: Session) {
     if (data?.source !== "msparty-overlay") return;
     if (data.type === "state") apply(data.state);
     if (data.type === "leave") unmountOverlay();
+    // Collapsed, the panel must stop covering the film. The iframe is opaque to
+    // clicks whatever it draws, so the frame itself has to shrink.
+    if (data.type === "resize" && overlay && typeof data.width === "number") {
+      overlay.style.width = `${data.width}px`;
+    }
   });
+
+  // Lets the panel say how far out of step this player is without asking for
+  // it. Cheap: one number a second, and only while something is playing.
+  setInterval(() => {
+    const video = adapter?.video();
+    if (!video || video.paused || !overlay?.contentWindow) return;
+    overlay.contentWindow.postMessage(
+      { source: "msparty-extension", type: "position", seconds: video.currentTime },
+      session.siteOrigin
+    );
+  }, 1000);
 }
 
 /** Netflix's player is unreachable from here; this puts a relay in the page. */
