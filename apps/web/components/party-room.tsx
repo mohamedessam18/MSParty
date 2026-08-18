@@ -391,38 +391,10 @@ export function PartyRoom({ party, userId }: { party: Party; userId: string }) {
   // every transient buffering report.
   const waitingFor = holding && stalled.length ? stalled.map(item => item.name).join("، ") : null;
 
-  async function changeVideo({ url, file }: { url: string; file: File | null }, onProgress: (percent: number) => void) {
-    let nextUrl = url;
-    let uploadedVideoId: string | undefined;
-
-    if (file) {
-      const signed = await fetch("/api/uploads", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ fileName: file.name, contentType: file.type, fileSize: file.size })
-      });
-      const data = await signed.json().catch(() => ({}));
-      if (!signed.ok) throw new Error(data.message || "تعذر تجهيز الرفع.");
-
-      await new Promise<void>((resolve, reject) => {
-        const xhr = new XMLHttpRequest();
-        xhr.open("PUT", data.uploadUrl);
-        xhr.setRequestHeader("Content-Type", file.type || "video/mp4");
-        // A 2GB swap with no feedback looks like a frozen button.
-        xhr.upload.onprogress = event =>
-          event.lengthComputable && onProgress(Math.round((event.loaded / event.total) * 100));
-        xhr.onload = () => (xhr.status >= 200 && xhr.status < 300 ? resolve() : reject(new Error("رفع الفيديو لم يكتمل.")));
-        xhr.onerror = () => reject(new Error("خطأ في الشبكة أثناء الرفع."));
-        xhr.send(file);
-      });
-
-      nextUrl = data.fileUrl;
-      uploadedVideoId = data.videoId;
-    }
-
-    if (!nextUrl) throw new Error("اكتب رابط أو اختار ملف.");
-    emit("control:changeVideo", { contentType: file ? "upload" : "youtube", contentUrl: nextUrl, uploadedVideoId });
-  }
+  // Uploading itself now lives in VideoPicker; the room only announces the swap.
+  const swapToYouTube = (url: string) => emit("control:changeVideo", { contentType: "youtube", contentUrl: url });
+  const swapToUpload = (videoId: string, fileUrl: string) =>
+    emit("control:changeVideo", { contentType: "upload", contentUrl: fileUrl, uploadedVideoId: videoId });
 
   const sendMessage = (message: string) => emit("chat:send", { message });
   const react = (emoji: string) => emit("reaction:send", { emoji });
@@ -515,7 +487,8 @@ export function PartyRoom({ party, userId }: { party: Party; userId: string }) {
             onInvite={() => setInviteOpen(true)}
             onToggleLock={() => emit("party:lock", { isLocked: !isLocked })}
             onToggleWaitForAll={() => emit("party:waitForAll", { enabled: !waitForAll })}
-            onChangeVideo={changeVideo}
+            onChangeVideo={swapToYouTube}
+            onSwapToUpload={swapToUpload}
             onGrant={targetId => {
               emit("control:grant", { userId: targetId });
               setRequests(items => items.filter(item => item.userId !== targetId));

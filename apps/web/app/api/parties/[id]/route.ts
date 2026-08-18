@@ -30,14 +30,10 @@ export async function DELETE(_: Request, { params }: { params: { id: string } })
     if (!party || party.hostId !== user.id) return NextResponse.json({ message: "Forbidden" }, { status: 403 });
 
     await prisma.$transaction([
-      // An attached video has cleanupAt = NULL, and the relation is SetNull, so
-      // deleting the party would leave a row the cleanup query can never match
-      // ({ cleanupAt: { lte: now } } never selects NULL) and the object would
-      // sit in R2 forever. Schedule it before the row loses its party.
-      prisma.uploadedVideo.updateMany({
-        where: { partyId: params.id },
-        data: { partyId: null, cleanupAt: new Date() }
-      }),
+      // Hand the video back to its owner's library instead of letting the
+      // SetNull relation strand it: a row with partyId and cleanupAt both NULL
+      // is invisible to the cleanup query, so this used to leak the object.
+      prisma.uploadedVideo.updateMany({ where: { partyId: params.id }, data: { partyId: null } }),
       prisma.party.delete({ where: { id: params.id } })
     ]);
     return new NextResponse(null, { status: 204 });

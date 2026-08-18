@@ -84,11 +84,21 @@ model UploadedVideo {
   party Party? @relation(fields: [partyId], references: [id], onDelete: SetNull)
   fileUrl String
   storageKey String @unique
+  title String?
   duration Float?
+  // Float, not Int: the 2GB ceiling is one byte past Int32's range.
+  sizeBytes Float?
+  // "pending" until the bytes are confirmed uploaded, then "ready". Only ready
+  // rows appear in a user's library; pending ones carry a cleanupAt so an
+  // abandoned upload cannot linger.
+  status String @default("pending")
+  // S3 multipart upload id, kept so an interrupted upload can be resumed or aborted.
+  multipartId String?
   uploadedAt DateTime @default(now())
   cleanupAt DateTime?
 
   @@index([cleanupAt])
+  @@index([uploaderId, status])
 }
 model ChatMessage {
   id String @id @default(cuid())

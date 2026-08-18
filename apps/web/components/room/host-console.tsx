@@ -3,6 +3,8 @@ import { useState } from "react";
 import { Button } from "@/components/ui/button";
 import { FormError, Input } from "@/components/ui/input";
 import { Kicker } from "@/components/ui/card";
+import { VideoLibrary } from "@/components/video-library";
+import { VideoPicker } from "@/components/video-picker";
 import { ControlRequest } from "./types";
 
 export function HostConsole({
@@ -17,6 +19,7 @@ export function HostConsole({
   onToggleLock,
   onToggleWaitForAll,
   onChangeVideo,
+  onSwapToUpload,
   onGrant,
   onDeny
 }: {
@@ -30,31 +33,24 @@ export function HostConsole({
   onInvite: () => void;
   onToggleLock: () => void;
   onToggleWaitForAll: () => void;
-  onChangeVideo: (input: { url: string; file: File | null }, onProgress: (percent: number) => void) => Promise<void>;
+  onChangeVideo: (youtubeUrl: string) => void;
+  onSwapToUpload: (videoId: string, fileUrl: string) => void;
   onGrant: (userId: string) => void;
   onDeny: (userId: string) => void;
 }) {
   const [url, setUrl] = useState("");
-  const [file, setFile] = useState<File | null>(null);
   const [busy, setBusy] = useState(false);
-  const [progress, setProgress] = useState<number | null>(null);
+  const [uploadBusy, setUploadBusy] = useState(false);
   const [error, setError] = useState("");
 
-  async function submit(event: React.FormEvent) {
+  function submit(event: React.FormEvent) {
     event.preventDefault();
+    if (!url.trim()) return;
     setError("");
     setBusy(true);
-    setProgress(file ? 0 : null);
-    try {
-      await onChangeVideo({ url, file }, setProgress);
-      setUrl("");
-      setFile(null);
-    } catch (err: any) {
-      setError(err?.message || "حدث خطأ أثناء تبديل الفيديو.");
-    } finally {
-      setBusy(false);
-      setProgress(null);
-    }
+    onChangeVideo(url.trim());
+    setUrl("");
+    window.setTimeout(() => setBusy(false), 800);
   }
 
   return (
@@ -115,40 +111,27 @@ export function HostConsole({
         </div>
       ))}
 
-      <form onSubmit={submit} className="mt-4 space-y-2 rounded-lg bg-ink/60 p-3">
-        <p className="text-sm text-ivory-dim">غيّر العرض — الفيديو المرفوع القديم يُحذف بعد 30 دقيقة.</p>
-        <div className="flex flex-col gap-2 sm:flex-row">
+      <div className="mt-4 space-y-3 rounded-lg bg-ink/60 p-3">
+        <p className="text-sm text-ivory-dim">غيّر العرض — الفيديو القديم يرجع لمكتبتك، مش بيتمسح.</p>
+
+        <form onSubmit={submit} className="flex flex-col gap-2 sm:flex-row">
           <Input
             dir="ltr"
             placeholder="رابط YouTube جديد"
             value={url}
-            onChange={event => {
-              setUrl(event.target.value);
-              setFile(null);
-            }}
+            onChange={event => setUrl(event.target.value)}
             aria-label="رابط الفيديو الجديد"
           />
-          <input
-            type="file"
-            accept="video/*"
-            aria-label="ارفع فيديو"
-            className="text-xs text-ivory-dim"
-            onChange={event => {
-              setFile(event.target.files?.[0] || null);
-              setUrl("");
-            }}
-          />
-          <Button type="submit" disabled={busy} className="shrink-0">
-            {busy ? (progress !== null ? `جارٍ الرفع (${progress}%)` : "جارٍ التبديل...") : "غيّر الفيديو"}
+          <Button type="submit" disabled={busy || !url.trim()} className="shrink-0">
+            {busy ? "جارٍ التبديل..." : "غيّر الفيديو"}
           </Button>
-        </div>
-        {progress !== null && (
-          <div className="h-1.5 w-full overflow-hidden rounded-full bg-ink-deep">
-            <div className="h-full bg-gold transition-all duration-200" style={{ width: `${progress}%` }} />
-          </div>
-        )}
+        </form>
+
+        <VideoPicker onUploaded={video => onSwapToUpload(video.videoId, video.fileUrl)} onBusyChange={setUploadBusy} />
+        <VideoLibrary onPick={video => onSwapToUpload(video.id, video.fileUrl)} />
+
         {error && <FormError>{error}</FormError>}
-      </form>
+      </div>
     </div>
   );
 }

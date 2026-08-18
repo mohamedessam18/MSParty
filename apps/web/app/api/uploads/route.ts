@@ -1,12 +1,16 @@
-import { PutObjectCommand } from "@aws-sdk/client-s3";
+import { CreateMultipartUploadCommand, PutObjectCommand } from "@aws-sdk/client-s3";
 import { getSignedUrl } from "@aws-sdk/s3-request-presigner";
 import { NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
 import { requireDbUser } from "@/lib/current-user";
 import { r2Client } from "@/lib/r2";
 
+export const dynamic = "force-dynamic";
+
 const MAX_VIDEO = 2 * 1024 ** 3;
 const MAX_IMAGE = 5 * 1024 ** 2;
+/** 32MB parts: 2GB stays under S3's 10,000-part cap with room to spare. */
+const PART_SIZE = 32 * 1024 ** 2;
 
 export async function POST(request: Request) {
   try {
@@ -14,7 +18,7 @@ export async function POST(request: Request) {
     const isVideo = !!contentType?.startsWith("video/");
     const isImage = !!contentType?.startsWith("image/");
 
-    if (!fileName || !Number.isFinite(fileSize)) {
+    if (!fileName || !Number.isFinite(fileSize) || fileSize <= 0) {
       return NextResponse.json({ message: "بيانات الملف ناقصة." }, { status: 400 });
     }
     if (!isVideo && !isImage) {
@@ -37,53 +41,81 @@ export async function POST(request: Request) {
     }
 
     const user = await requireDbUser();
+    const safeName = fileName.replace(/[^a-zA-Z0-9._-]/g, "_");
+    const client = r2Client();
+
+    // Avatars stay a single PUT: they are small, and they get no library row —
+    // an avatar has no owning party and must outlive one.
+    if (isImage) {
+      const key = `avatars/${user.id}/${crypto.randomUUID()}-${safeName}`;
+      const uploadUrl = await getSignedUrl(
+        client,
+        new PutObjectCommand({ Bucket: process.env.R2_BUCKET, Key: key, ContentType: contentType }),
+        { expiresIn: 900 }
+      );
+      return NextResponse.json({ uploadUrl, fileUrl: `${process.env.R2_PUBLIC_URL}/${key}` });
+    }
 
     // Guests sign up with nothing but a name, and they cannot host, so they can
-    // never legitimately need a video slot — only an avatar. Without this, one
-    // name field stands between anyone and filling the bucket with 2 GB files.
-    if (isVideo && user.isGuest) {
+    // never legitimately need a video slot — only an avatar.
+    if (user.isGuest) {
       return NextResponse.json({ message: "لازم تعمل حساب عشان ترفع فيديو." }, { status: 403 });
     }
 
-    if (isVideo) {
-      // Rows are created before the bytes arrive, so an abandoned picker leaves
-      // a pending row behind. Cap how many a single user can hold open at once.
-      const pending = await prisma.uploadedVideo.count({
-        where: { uploaderId: user.id, partyId: null, cleanupAt: { not: null } }
-      });
-      if (pending >= 3) {
-        return NextResponse.json(
-          { message: "عندك رفعات كتير معلّقة. استنى شوية وجرّب تاني." },
-          { status: 429 }
-        );
-      }
+    const pending = await prisma.uploadedVideo.count({ where: { uploaderId: user.id, status: "pending" } });
+    if (pending >= 3) {
+      return NextResponse.json(
+        { message: "عندك رفعات كتير معلّقة. كمّلها أو الغيها الأول." },
+        { status: 429 }
+      );
     }
 
-    const safeName = fileName.replace(/[^a-zA-Z0-9._-]/g, "_");
-    const prefix = isVideo ? "party-uploads" : "avatars";
-    const key = `${prefix}/${user.id}/${crypto.randomUUID()}-${safeName}`;
-
-    const uploadUrl = await getSignedUrl(
-      r2Client(),
-      new PutObjectCommand({ Bucket: process.env.R2_BUCKET, Key: key, ContentType: contentType }),
-      { expiresIn: 900 }
+    const key = `party-uploads/${user.id}/${crypto.randomUUID()}-${safeName}`;
+    const multipart = await client.send(
+      new CreateMultipartUploadCommand({ Bucket: process.env.R2_BUCKET, Key: key, ContentType: contentType })
     );
-    const fileUrl = `${process.env.R2_PUBLIC_URL}/${key}`;
-
-    // Only videos are tracked for cleanup. An avatar has no owning party and
-    // must outlive it, so giving it an UploadedVideo row would schedule the
-    // user's picture for deletion two hours later.
-    if (!isVideo) return NextResponse.json({ uploadUrl, fileUrl });
+    if (!multipart.UploadId) throw new Error("R2 did not return an upload id");
 
     const video = await prisma.uploadedVideo.create({
-      data: { uploaderId: user.id, fileUrl, storageKey: key, cleanupAt: new Date(Date.now() + 2 * 60 * 60 * 1000) }
+      data: {
+        uploaderId: user.id,
+        fileUrl: `${process.env.R2_PUBLIC_URL}/${key}`,
+        storageKey: key,
+        title: fileName.slice(0, 120),
+        sizeBytes: fileSize,
+        status: "pending",
+        multipartId: multipart.UploadId,
+        // An abandoned upload must not linger. Cleared once it is confirmed.
+        cleanupAt: new Date(Date.now() + 6 * 60 * 60 * 1000)
+      }
     });
-    return NextResponse.json({ uploadUrl, fileUrl, videoId: video.id });
+
+    return NextResponse.json({
+      videoId: video.id,
+      fileUrl: video.fileUrl,
+      partSize: PART_SIZE,
+      partCount: Math.ceil(fileSize / PART_SIZE)
+    });
   } catch (err: any) {
-    console.error("R2 Upload Route Error:", err);
+    console.error("Upload init error:", err);
     return NextResponse.json(
       { message: err?.message || "تعذر تجهيز الرفع. راجع إعدادات Cloudflare R2." },
       { status: 500 }
     );
+  }
+}
+
+/** Lists the caller's library — everything ready, newest first. */
+export async function GET() {
+  try {
+    const user = await requireDbUser();
+    const videos = await prisma.uploadedVideo.findMany({
+      where: { uploaderId: user.id, status: "ready" },
+      orderBy: { uploadedAt: "desc" },
+      select: { id: true, title: true, duration: true, sizeBytes: true, fileUrl: true, partyId: true, uploadedAt: true }
+    });
+    return NextResponse.json(videos);
+  } catch {
+    return NextResponse.json({ message: "Unauthorized" }, { status: 401 });
   }
 }

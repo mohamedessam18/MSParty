@@ -232,17 +232,22 @@ async function applyVideo(
   hold.heldAt = null;
   hold.ignoreUntil = Date.now() + IGNORE_AFTER_JUMP;
   return prisma.$transaction(async transaction => {
-    await transaction.uploadedVideo.updateMany({
-      where: { partyId },
-      data: { partyId: null, cleanupAt: new Date(Date.now() + 30 * 60 * 1000) }
-    });
+    // Detaching returns the video to its owner's library rather than scheduling
+    // it for deletion; reusing a film should not mean uploading it twice.
+    await transaction.uploadedVideo.updateMany({ where: { partyId }, data: { partyId: null } });
     if (contentType === "upload") {
       // Prisma drops `undefined` filters, so an absent id would match every
       // unattached upload the user owns. Refuse rather than attach the wrong one.
       if (!options.uploadedVideoId) throw new Error("Missing upload id");
       const attached = await transaction.uploadedVideo.updateMany({
-        where: { id: options.uploadedVideoId, uploaderId: options.uploaderId, partyId: null },
-        data: { partyId, cleanupAt: null }
+        where: {
+          id: options.uploadedVideoId,
+          uploaderId: options.uploaderId,
+          partyId: null,
+          // Half-uploaded files must never reach a room.
+          status: "ready"
+        },
+        data: { partyId }
       });
       if (attached.count !== 1) throw new Error("Invalid upload");
     }
