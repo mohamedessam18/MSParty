@@ -18,6 +18,7 @@ import { CameraBubbles, CameraCorner, CameraStrip } from "./room/camera-bubbles"
 import { SubtitleLayer } from "./room/subtitle-layer";
 import { useScreenWake } from "./room/use-screen-wake";
 import { useCall } from "./room/use-call";
+import { PlatformStage } from "./room/platform-stage";
 import { VideoStage } from "./room/video-stage";
 import { VoiceBar } from "./room/voice-bar";
 import type { ControlRequest, FlyingReaction, Member, Message, QueueItem } from "./room/types";
@@ -30,6 +31,7 @@ type Party = {
   name: string;
   contentType: string;
   contentUrl: string | null;
+  platform?: string | null;
   videoTitle?: string | null;
   videoChannel?: string | null;
   hostId: string;
@@ -602,6 +604,15 @@ export function PartyRoom({ party, userId }: { party: Party; userId: string }) {
         </div>
 
         <div className="relative">
+          {contentType === "platform" ? (
+            <PlatformStage
+              platform={party.platform ?? null}
+              contentUrl={contentUrl}
+              title={party.videoTitle || party.name}
+              isHost={isHost}
+              memberCount={members.length}
+            />
+          ) : (
           <VideoStage
             contentType={contentType}
             contentUrl={contentUrl}
@@ -643,12 +654,15 @@ export function PartyRoom({ party, userId }: { party: Party; userId: string }) {
               <StageOverlay messages={messages} chromeShown={chromeShown} onSend={sendMessage} onReact={react} />
             )}
           />
+          )}
           <ReactionLayer reactions={reactions} />
         </div>
 
-        <p className="mt-3 text-center text-xs text-ivory-dim">
-          {playing ? `${hostName} يشغّل الآن` : isHost ? "الفيديو جاهز — شغّله لما تكونوا مستعدين" : `${hostName} لم يبدأ التشغيل بعد`}
-        </p>
+        {contentType !== "platform" && (
+          <p className="mt-3 text-center text-xs text-ivory-dim">
+            {playing ? `${hostName} يشغّل الآن` : isHost ? "الفيديو جاهز — شغّله لما تكونوا مستعدين" : `${hostName} لم يبدأ التشغيل بعد`}
+          </p>
+        )}
 
         <MemberSeats members={members} userId={userId} stalledIds={stalled.map(item => item.userId)} />
 

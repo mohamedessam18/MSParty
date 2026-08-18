@@ -5,6 +5,7 @@ import { AbortMultipartUploadCommand, DeleteObjectCommand, S3Client } from "@aws
 import { PrismaClient } from "@prisma/client";
 import { jwtVerify } from "jose";
 import { Server, Socket } from "socket.io";
+import { normalisePlatformUrl, platformForUrl } from "./platforms";
 
 const prisma = new PrismaClient();
 const secret = new TextEncoder().encode(process.env.SYNC_TOKEN_SECRET || process.env.NEXTAUTH_SECRET);
@@ -248,7 +249,13 @@ function getLiveTimestamp(party: { isPlaying: boolean; currentTimestamp: number;
 
 function emitState(
   partyId: string,
-  party: { isPlaying: boolean; currentTimestamp: number; contentType?: string; contentUrl?: string | null },
+  party: {
+    isPlaying: boolean;
+    currentTimestamp: number;
+    contentType?: string;
+    contentUrl?: string | null;
+    platform?: string | null;
+  },
   /**
    * Marks a change the server made on its own. The host ignores ordinary
    * broadcasts because it is the one causing them, but it has to obey this or
@@ -261,7 +268,9 @@ function emitState(
     timestamp: party.currentTimestamp,
     serverTime: Date.now(),
     ...(authoritative ? { authoritative: true } : {}),
-    ...(party.contentType ? { contentType: party.contentType, contentUrl: party.contentUrl } : {})
+    ...(party.contentType
+      ? { contentType: party.contentType, contentUrl: party.contentUrl, platform: party.platform ?? null }
+      : {})
   });
 }
 
@@ -304,7 +313,7 @@ async function applyVideo(
   partyId: string,
   contentType: string,
   contentUrl: string,
-  options: { uploadedVideoId?: string; uploaderId?: string } = {}
+  options: { uploadedVideoId?: string; uploaderId?: string; platform?: string | null } = {}
 ) {
   const hold = holdFor(partyId);
   hold.heldAt = null;
@@ -332,8 +341,17 @@ async function applyVideo(
     return transaction.party.update({
       where: { id: partyId },
       // A subtitle track belongs to one film. Carrying it over to the next one
-      // leaves the room reading lines from the wrong movie.
-      data: { contentType, contentUrl, isPlaying: false, currentTimestamp: 0, subtitlesUrl: null }
+      // leaves the room reading lines from the wrong movie. The service is
+      // cleared too, so switching away from a platform party does not leave a
+      // stale badge pointing at Netflix over a YouTube video.
+      data: {
+        contentType,
+        contentUrl,
+        platform: contentType === "platform" ? options.platform ?? null : null,
+        isPlaying: false,
+        currentTimestamp: 0,
+        subtitlesUrl: null
+      }
     });
   });
 }
@@ -346,11 +364,22 @@ async function changeVideo(
   uploadedVideoId?: string
 ) {
   if (!(await requireHost(socket, partyId))) return;
-  if (!["youtube", "upload"].includes(contentType) || !contentUrl) {
+  if (!["youtube", "upload", "platform"].includes(contentType) || !contentUrl) {
     return socket.emit("error:unauthorized", { message: "فيديو غير صالح" });
   }
+
+  // Worked out here rather than taken from the client: the service decides
+  // where the extension sends everyone, so it has to come from the URL itself.
+  let platform: string | null = null;
+  let url = contentUrl;
+  if (contentType === "platform") {
+    platform = platformForUrl(contentUrl);
+    if (!platform) return socket.emit("error:unauthorized", { message: "الرابط ده مش من منصة مدعومة" });
+    url = normalisePlatformUrl(contentUrl);
+  }
+
   try {
-    const party = await applyVideo(partyId, contentType, contentUrl, { uploadedVideoId, uploaderId: socket.userId });
+    const party = await applyVideo(partyId, contentType, url, { uploadedVideoId, uploaderId: socket.userId, platform });
     emitState(partyId, party);
   } catch {
     socket.emit("error:unauthorized", { message: "تعذر تغيير الفيديو" });
@@ -487,6 +516,7 @@ io.on("connection", rawSocket => {
         serverTime: Date.now(),
         contentType: party.contentType,
         contentUrl: party.contentUrl,
+        platform: party.platform,
         role: member.role,
         isLocked: party.isLocked,
         subtitlesUrl: party.subtitlesUrl,

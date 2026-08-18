@@ -5,6 +5,7 @@ import { useCallback, useEffect, useState } from "react";
 import { VideoLibrary, type LibraryVideo } from "@/components/video-library";
 import { VideoPicker, type PickedVideo } from "@/components/video-picker";
 import { YouTubePreview, type YouTubeMeta } from "@/components/youtube-preview";
+import { PLATFORMS, parsePlatformLink, platformBySlug, type PlatformSlug } from "@/lib/platforms";
 import { Button } from "@/components/ui/button";
 import { Card, Kicker } from "@/components/ui/card";
 import { Field, FormError, Input } from "@/components/ui/input";
@@ -19,7 +20,8 @@ export default function CreateParty() {
   // Whether the host has written the name themselves. Until they do, picking a
   // video fills it in for them; after, nothing overwrites what they typed.
   const [nameTouched, setNameTouched] = useState(false);
-  const [contentType, setContentType] = useState<"youtube" | "upload">("youtube");
+  const [contentType, setContentType] = useState<"youtube" | "upload" | "platform">("youtube");
+  const [platform, setPlatform] = useState<PlatformSlug | null>(null);
   const [visibility, setVisibility] = useState<"private" | "friends" | "code">("friends");
   const [contentUrl, setContentUrl] = useState("");
   const [youtube, setYoutube] = useState<YouTubeMeta | null>(null);
@@ -35,7 +37,7 @@ export default function CreateParty() {
   useEffect(() => {
     const params = new URLSearchParams(window.location.search);
     const type = params.get("type");
-    if (type === "youtube" || type === "upload") setContentType(type);
+    if (type === "youtube" || type === "upload" || type === "platform") setContentType(type);
     const url = params.get("url");
     if (url) setContentUrl(url);
     const suggested = params.get("name");
@@ -79,6 +81,10 @@ export default function CreateParty() {
     if (contentType === "youtube" && youtube?.detailed && !youtube.embeddable) {
       return setError("الفيديو ده مش هيشتغل بره يوتيوب. اختار غيره.");
     }
+    if (contentType === "platform") {
+      if (!platform) return setError("اختار المنصة الأول.");
+      if (!link?.ok) return setError(link?.message || "الزق رابط الحلقة أو الفيلم.");
+    }
     setCreating(true);
     try {
       const response = await fetch("/api/parties", {
@@ -103,8 +109,13 @@ export default function CreateParty() {
 
   const modes = [
     { value: "youtube" as const, icon: "▶", title: "YouTube", hint: "رابط جاهز للشلة" },
-    { value: "upload" as const, icon: "▣", title: "فيديو مرفوع", hint: "من جهازك أو مكتبتك" }
+    { value: "upload" as const, icon: "▣", title: "فيديو مرفوع", hint: "من جهازك أو مكتبتك" },
+    { value: "platform" as const, icon: "◈", title: "منصة", hint: "نتفليكس وشاهد وغيرهم" }
   ];
+
+  // Checked as the host types so a wrong link is caught before six people are
+  // invited to it. The server derives the service from the URL regardless.
+  const link = contentType === "platform" && contentUrl.trim() ? parsePlatformLink(contentUrl, platform ?? undefined) : null;
 
   return (
     <main className="mx-auto min-h-screen max-w-2xl px-5 py-6">
@@ -136,30 +147,92 @@ export default function CreateParty() {
 
             <fieldset>
               <legend className="text-sm text-ivory-dim">نوع العرض</legend>
-              <div className="mt-2 grid grid-cols-2 gap-3">
+              <div className="mt-2 grid grid-cols-3 gap-2 sm:gap-3">
                 {modes.map(mode => (
                   <button
                     key={mode.value}
                     type="button"
                     aria-pressed={contentType === mode.value}
                     onClick={() => setContentType(mode.value)}
-                    className={`rounded-lg border p-4 text-right transition ${
+                    className={`rounded-lg border p-3 text-right transition sm:p-4 ${
                       contentType === mode.value ? "border-gold bg-gold/10" : "border-velvet-hi hover:border-gold/40"
                     }`}
                   >
-                    <b className="block text-ivory">
+                    <b className="block text-sm text-ivory sm:text-base">
                       <span aria-hidden className="ml-1 text-gold">
                         {mode.icon}
                       </span>
                       {mode.title}
                     </b>
-                    <span className="mt-1 block text-xs text-ivory-dim">{mode.hint}</span>
+                    <span className="mt-1 block text-[11px] leading-5 text-ivory-dim sm:text-xs">{mode.hint}</span>
                   </button>
                 ))}
               </div>
             </fieldset>
 
-            {contentType === "youtube" ? (
+            {contentType === "platform" ? (
+              <div className="space-y-4">
+                <fieldset>
+                  <legend className="text-sm text-ivory-dim">المنصة</legend>
+                  <div className="mt-2 flex flex-wrap gap-2">
+                    {PLATFORMS.map(option => (
+                      <button
+                        key={option.slug}
+                        type="button"
+                        aria-pressed={platform === option.slug}
+                        onClick={() => setPlatform(option.slug)}
+                        className={`rounded-lg border px-3 py-2 text-sm transition ${
+                          platform === option.slug
+                            ? "border-gold bg-gold/10 text-ivory"
+                            : "border-velvet-hi text-ivory-dim hover:border-gold/40 hover:text-ivory"
+                        }`}
+                      >
+                        <span aria-hidden className="mono ml-1.5 text-xs text-gold">
+                          {option.mark}
+                        </span>
+                        {option.label}
+                      </button>
+                    ))}
+                  </div>
+                </fieldset>
+
+                {platform && (
+                  <Field
+                    label={`رابط الحلقة أو الفيلم على ${platformBySlug(platform)?.label}`}
+                    hint="افتح اللي هتتفرجوا عليه على المنصة، وانسخ الرابط من شريط العنوان"
+                  >
+                    <Input
+                      required
+                      dir="ltr"
+                      placeholder={platformBySlug(platform)?.example}
+                      value={contentUrl}
+                      onChange={event => setContentUrl(event.target.value)}
+                    />
+                  </Field>
+                )}
+
+                {link && !link.ok && <FormError>{link.message}</FormError>}
+                {link?.ok && (
+                  <p className="rounded-lg border border-gold/30 bg-gold/[.06] px-3 py-2 text-sm text-ivory">
+                    الرابط سليم — {link.platform.label} ✓
+                  </p>
+                )}
+
+                <div className="space-y-2 rounded-lg border border-velvet-hi bg-velvet/50 p-4 text-xs leading-6 text-ivory-dim">
+                  <b className="block text-sm text-ivory">اللي لازم تعرفه قبل ما تفتحها</b>
+                  <p>
+                    المنصات دي مابتشتغلش جوه أي موقع تاني — بتتفرجوا عندهم، والإضافة بتاعتنا بتزامن التشغيل وترسم الشات
+                    فوق الصفحة.
+                  </p>
+                  <ul className="list-inside list-disc space-y-1">
+                    <li>كل واحد لازم يكون معاه اشتراكه الخاص</li>
+                    <li>لاب توب أو كمبيوتر — الإضافات مش بتشتغل على متصفحات الموبايل</li>
+                    <li>اللي مش معاه اشتراك يقدر يدخل الشات والصوت مع الشلة</li>
+                  </ul>
+                  <p className="text-gold">الإضافة لسه تحت التنفيذ. تقدر تفتح السهرة دلوقتي وتتكلموا فيها.</p>
+                </div>
+              </div>
+            ) : contentType === "youtube" ? (
               <div className="space-y-3">
                 <Field label="رابط فيديو YouTube">
                   <Input required dir="ltr" placeholder="https://youtube.com/watch?v=…" value={contentUrl} onChange={event => setContentUrl(event.target.value)} />

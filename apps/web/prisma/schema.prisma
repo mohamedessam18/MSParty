@@ -182,8 +182,13 @@ model Party {
   hostId String
   host User @relation("HostedParties", fields: [hostId], references: [id])
   name String
+  // youtube | upload | platform. A platform party is watched on the service's
+  // own site through the extension; contentUrl holds the deep link to it.
   contentType String
   contentUrl String?
+  // Which service, when contentType is "platform". Kept as its own column so a
+  // party can be found by service without parsing every URL.
+  platform String?
   currentTimestamp Float @default(0)
   isPlaying Boolean @default(false)
   isLocked Boolean @default(false)

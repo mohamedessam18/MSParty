@@ -7,6 +7,7 @@ import { VISIBILITIES, type Visibility } from "@/lib/party-access";
 import { friendIdsOf } from "@/lib/friends";
 import { notifyFriendsLive } from "@/lib/notify";
 import { fetchYouTubeMeta } from "@/lib/youtube";
+import { parsePlatformLink } from "@/lib/platforms";
 import { recordWatch } from "@/lib/history";
 
 export async function GET() {
@@ -39,7 +40,7 @@ export async function POST(request: Request) {
 
   const { name, contentType, contentUrl, uploadedVideoId, visibility } = await request.json();
   const access: Visibility = VISIBILITIES.includes(visibility) ? visibility : "code";
-  if (!name?.trim() || !["youtube", "upload"].includes(contentType) || (contentType === "upload" && !uploadedVideoId)) {
+  if (!name?.trim() || !["youtube", "upload", "platform"].includes(contentType) || (contentType === "upload" && !uploadedVideoId)) {
     return NextResponse.json({ message: "Invalid party" }, { status: 400 });
   }
 
@@ -51,7 +52,20 @@ export async function POST(request: Request) {
     videoChannel?: string | null;
     videoDescription?: string | null;
     videoDuration?: number | null;
+    platform?: string | null;
   } = {};
+
+  let resolvedUrl: string | null = contentUrl ?? null;
+
+  if (contentType === "platform") {
+    // The service is derived from the link rather than trusted from the form:
+    // the two disagreeing would send everyone to a site the party is not on.
+    const link = parsePlatformLink(contentUrl || "");
+    if (!link.ok) return NextResponse.json({ message: link.message }, { status: 400 });
+    details.platform = link.platform.slug;
+    details.videoChannel = link.platform.label;
+    resolvedUrl = link.url;
+  }
 
   if (contentType === "youtube") {
     const meta = await fetchYouTubeMeta(contentUrl || "");
@@ -93,7 +107,7 @@ export async function POST(request: Request) {
               code: generatePartyCode(),
               visibility: access,
               contentType,
-              contentUrl,
+              contentUrl: resolvedUrl,
               hostId: user.id,
               ...details,
               members: { create: { userId: user.id, role: "host" } }
