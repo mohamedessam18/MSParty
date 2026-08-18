@@ -59,24 +59,89 @@ function dropPresence(partyId: string, userId: string) {
   return false;
 }
 
-/** Who in each party is still loading video, so the room can wait for them. */
-const buffering = new Map<string, Map<string, string>>();
+/** Who in each party is still loading video, and since when. */
+const buffering = new Map<string, Map<string, { name: string; since: number }>>();
+
+/**
+ * "Wait for everyone" lives here rather than in the host's tab. The server owns
+ * isPlaying, so it can hold and release the room without depending on a
+ * browser that may be backgrounded or offline.
+ */
+type Hold = { enabled: boolean; heldAt: number | null; ignoreUntil: number };
+const holds = new Map<string, Hold>();
+const holdFor = (partyId: string) => {
+  const existing = holds.get(partyId);
+  if (existing) return existing;
+  const created: Hold = { enabled: false, heldAt: null, ignoreUntil: 0 };
+  holds.set(partyId, created);
+  return created;
+};
+
+// A blip shorter than this is not worth stopping a film for.
+const STALL_GRACE = 2500;
+// Nobody gets to hold the room hostage; a wedged client must not freeze it.
+const MAX_HOLD = 20000;
+// Players report buffering as a matter of course right after a seek or a
+// content swap. Treating that as a stall made every host seek pause the room.
+const IGNORE_AFTER_JUMP = 4000;
+
+function stalledIn(partyId: string, now = Date.now()) {
+  const party = buffering.get(partyId);
+  if (!party) return [];
+  return [...party.entries()]
+    .filter(([, entry]) => now - entry.since >= STALL_GRACE)
+    .map(([userId, entry]) => ({ userId, name: entry.name }));
+}
 
 function publishReadiness(partyId: string) {
-  const stalled = buffering.get(partyId);
+  const party = buffering.get(partyId);
   io.to(roomFor(partyId)).emit("party:readiness", {
-    buffering: stalled ? [...stalled.entries()].map(([userId, name]) => ({ userId, name })) : []
+    buffering: party ? [...party.entries()].map(([userId, entry]) => ({ userId, name: entry.name })) : [],
+    holding: !!holdFor(partyId).heldAt,
+    waitForAll: holdFor(partyId).enabled
   });
 }
 
 function setBuffering(partyId: string, userId: string, name: string, isBuffering: boolean) {
-  const party = buffering.get(partyId) ?? new Map<string, string>();
+  const party = buffering.get(partyId) ?? new Map<string, { name: string; since: number }>();
   buffering.set(partyId, party);
   const had = party.has(userId);
-  if (isBuffering) party.set(userId, name);
-  else party.delete(userId);
+  // Keep the original `since` so a repeated report does not reset the grace timer.
+  if (isBuffering && !had) party.set(userId, { name, since: Date.now() });
+  if (!isBuffering) party.delete(userId);
   if (!party.size) buffering.delete(partyId);
   if (had !== isBuffering) publishReadiness(partyId);
+}
+
+/** Pauses while someone is genuinely stuck, and lets go on its own. */
+async function evaluateHold(partyId: string) {
+  const hold = holds.get(partyId);
+  if (!hold?.enabled) return;
+  const now = Date.now();
+  if (now < hold.ignoreUntil) return;
+
+  const stalled = stalledIn(partyId, now);
+  const party = await prisma.party.findUnique({ where: { id: partyId } });
+  if (!party) return;
+
+  if (!hold.heldAt && party.isPlaying && stalled.length) {
+    hold.heldAt = now;
+    // Bank the live position before pausing, or the resume would rewind to
+    // wherever the last explicit control message left currentTimestamp.
+    const updated = await prisma.party.update({
+      where: { id: partyId },
+      data: { isPlaying: false, currentTimestamp: getLiveTimestamp(party) }
+    });
+    emitState(partyId, updated, true);
+    publishReadiness(partyId);
+  } else if (hold.heldAt && (!stalled.length || now - hold.heldAt > MAX_HOLD)) {
+    hold.heldAt = null;
+    if (!party.isPlaying) {
+      const updated = await prisma.party.update({ where: { id: partyId }, data: { isPlaying: true } });
+      emitState(partyId, updated, true);
+    }
+    publishReadiness(partyId);
+  }
 }
 
 async function tokenUser(token: string) {
@@ -105,12 +170,19 @@ function getLiveTimestamp(party: { isPlaying: boolean; currentTimestamp: number;
 
 function emitState(
   partyId: string,
-  party: { isPlaying: boolean; currentTimestamp: number; contentType?: string; contentUrl?: string | null }
+  party: { isPlaying: boolean; currentTimestamp: number; contentType?: string; contentUrl?: string | null },
+  /**
+   * Marks a change the server made on its own. The host ignores ordinary
+   * broadcasts because it is the one causing them, but it has to obey this or
+   * an automatic hold would pause everyone except the host.
+   */
+  authoritative = false
 ) {
   io.to(roomFor(partyId)).emit("sync:state", {
     isPlaying: party.isPlaying,
     timestamp: party.currentTimestamp,
     serverTime: Date.now(),
+    ...(authoritative ? { authoritative: true } : {}),
     ...(party.contentType ? { contentType: party.contentType, contentUrl: party.contentUrl } : {})
   });
 }
@@ -139,6 +211,12 @@ async function control(
   update: { isPlaying?: boolean; currentTimestamp?: number }
 ) {
   if (!(await requireHost(socket, partyId))) return;
+  const hold = holdFor(partyId);
+  // An explicit decision by the host outranks an automatic hold: drop the hold
+  // so it cannot later "resume" a video the host deliberately paused. The
+  // ignore window covers the buffering every player reports after a jump.
+  hold.heldAt = null;
+  hold.ignoreUntil = Date.now() + IGNORE_AFTER_JUMP;
   const party = await prisma.party.update({ where: { id: partyId }, data: update });
   emitState(partyId, party);
 }
@@ -150,6 +228,9 @@ async function applyVideo(
   contentUrl: string,
   options: { uploadedVideoId?: string; uploaderId?: string } = {}
 ) {
+  const hold = holdFor(partyId);
+  hold.heldAt = null;
+  hold.ignoreUntil = Date.now() + IGNORE_AFTER_JUMP;
   return prisma.$transaction(async transaction => {
     await transaction.uploadedVideo.updateMany({
       where: { partyId },
@@ -262,6 +343,7 @@ io.on("connection", rawSocket => {
         isLocked: party.isLocked
       });
       await emitQueue(partyId);
+      publishReadiness(partyId);
 
       if (addPresence(partyId, socket.userId!)) {
         socket.to(roomFor(partyId)).emit("party:memberJoined", {
@@ -448,6 +530,19 @@ io.on("connection", rawSocket => {
     setBuffering(partyId, socket.userId!, socket.userName || "", !!isBuffering);
   });
 
+  socket.on("party:waitForAll", async ({ partyId, enabled }) => {
+    if (!(await requireHost(socket, partyId))) return;
+    const hold = holdFor(partyId);
+    hold.enabled = !!enabled;
+    // Turning it off must also release anything it is currently holding.
+    if (!hold.enabled && hold.heldAt) {
+      hold.heldAt = null;
+      const party = await prisma.party.update({ where: { id: partyId }, data: { isPlaying: true } });
+      emitState(partyId, party, true);
+    }
+    publishReadiness(partyId);
+  });
+
   // --- Voice chat signalling -------------------------------------------------
   // The server only relays; audio travels peer to peer. Peers are keyed by
   // socket id rather than user id so two tabs never collapse into one peer.
@@ -505,6 +600,16 @@ setInterval(async () => {
     });
   }
 }, 5000);
+
+// Held rooms need re-checking on a clock, not only when a report arrives: the
+// grace period and the maximum hold both elapse without any client saying so.
+setInterval(() => {
+  for (const [partyId, hold] of holds) {
+    if (hold.enabled && (hold.heldAt || buffering.has(partyId))) {
+      evaluateHold(partyId).catch(() => undefined);
+    }
+  }
+}, 1000);
 
 setInterval(() => { cleanupExpiredUploads().catch(() => undefined); }, 5 * 60 * 1000);
 cleanupExpiredUploads().catch(() => undefined);

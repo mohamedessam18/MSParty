@@ -72,10 +72,9 @@ export function PartyRoom({ party, userId }: { party: Party; userId: string }) {
 
   const [playing, setPlaying] = useState(party.isPlaying);
   const [isLocked, setIsLocked] = useState(party.isLocked);
-  // Off by default: with it on, every single person joining mid-film paused the
-  // whole room while their player buffered. It is worth having, but only when
-  // the host deliberately asks for it.
+  // Mirrors the server's per-party setting; off unless the host asks for it.
   const [waitForAll, setWaitForAll] = useState(false);
+  const [holding, setHolding] = useState(false);
   const [connected, setConnected] = useState(false);
   const [muted, setMuted] = useState(false);
   const [tab, setTab] = useState<"chat" | "people" | "queue">("chat");
@@ -101,7 +100,7 @@ export function PartyRoom({ party, userId }: { party: Party; userId: string }) {
   }, []);
 
   const applyState = useCallback(
-    ({ isPlaying, timestamp, serverTime, contentType: incomingType, contentUrl: incomingUrl, role: incomingRole, isLocked: incomingLock }: any) => {
+    ({ isPlaying, timestamp, serverTime, contentType: incomingType, contentUrl: incomingUrl, role: incomingRole, isLocked: incomingLock, authoritative }: any) => {
       setPlaying(isPlaying);
       if (incomingRole) setRole(incomingRole);
       if (typeof incomingLock === "boolean") setIsLocked(incomingLock);
@@ -115,8 +114,11 @@ export function PartyRoom({ party, userId }: { party: Party; userId: string }) {
       // position when it first arrives. Without this, a host that reloads (or
       // whose IFrame player got rebuilt) sits at 0 while the room is at 0:47,
       // and its next play or pause broadcasts 0 and drags everyone to the start.
+      // `authoritative` marks a change the server made by itself (the automatic
+      // hold). The host must obey those too, or the room pauses for everyone
+      // except the person driving it.
       const isJoinSnapshot = !!incomingRole;
-      if (isHostRef.current && !isJoinSnapshot) return;
+      if (isHostRef.current && !isJoinSnapshot && !authoritative) return;
 
       const corrected = isPlaying ? timestamp + (Date.now() - serverTime) / 1000 : timestamp;
       const local = video.current ? video.current.currentTime || 0 : player.current?.currentTime() || 0;
@@ -224,8 +226,13 @@ export function PartyRoom({ party, userId }: { party: Party; userId: string }) {
         });
         client.on("party:lockChanged", ({ isLocked: locked }: { isLocked: boolean }) => setIsLocked(locked));
         client.on("party:kicked", () => router.replace("/dashboard"));
-        client.on("party:readiness", ({ buffering }: { buffering: { userId: string; name: string }[] }) =>
-          setStalled(buffering)
+        client.on(
+          "party:readiness",
+          ({ buffering, holding: isHolding, waitForAll: serverWait }: { buffering: { userId: string; name: string }[]; holding: boolean; waitForAll: boolean }) => {
+            setStalled(buffering);
+            setHolding(!!isHolding);
+            setWaitForAll(!!serverWait);
+          }
         );
 
         client.on("queue:updated", ({ items }: { items: QueueItem[] }) => setQueue(items));
@@ -329,31 +336,10 @@ export function PartyRoom({ party, userId }: { party: Party; userId: string }) {
     }
   }, [playing, control]);
 
-  // Hold the room for anyone still loading, then let it go again by itself.
-  const autoPaused = useRef(false);
-  useEffect(() => {
-    if (!isHost || !waitForAll) {
-      autoPaused.current = false;
-      return;
-    }
-    if (playing && stalled.length && !autoPaused.current) {
-      autoPaused.current = true;
-      togglePlayback();
-    } else if (!playing && !stalled.length && autoPaused.current) {
-      autoPaused.current = false;
-      togglePlayback();
-    }
-  }, [isHost, waitForAll, playing, stalled, togglePlayback]);
-
-  /**
-   * A host pressing play or pause takes ownership back from the auto-hold.
-   * Without clearing the latch, overriding a wait left it stuck on, and the
-   * next person to buffer would never pause the room.
-   */
-  const hostToggle = useCallback(() => {
-    autoPaused.current = false;
-    togglePlayback();
-  }, [togglePlayback]);
+  // The hold itself lives on the sync server, which owns isPlaying. Driving it
+  // from here meant a backgrounded host tab stopped releasing the room, and
+  // every buffering blip produced its own play/pause round trip.
+  const hostToggle = togglePlayback;
 
   function seek(seconds: number) {
     setCurrentTime(seconds);
@@ -396,7 +382,9 @@ export function PartyRoom({ party, userId }: { party: Party; userId: string }) {
   }
 
   const typingNames = useMemo(() => typing.map(item => item.name), [typing]);
-  const waitingFor = waitForAll && stalled.length ? stalled.map(item => item.name).join("، ") : null;
+  // Only announce a wait once the server has actually held the room, not on
+  // every transient buffering report.
+  const waitingFor = holding && stalled.length ? stalled.map(item => item.name).join("، ") : null;
 
   async function changeVideo({ url, file }: { url: string; file: File | null }) {
     let nextUrl = url;
@@ -518,7 +506,7 @@ export function PartyRoom({ party, userId }: { party: Party; userId: string }) {
             onRestart={() => seek(0)}
             onInvite={() => setInviteOpen(true)}
             onToggleLock={() => emit("party:lock", { isLocked: !isLocked })}
-            onToggleWaitForAll={() => setWaitForAll(value => !value)}
+            onToggleWaitForAll={() => emit("party:waitForAll", { enabled: !waitForAll })}
             onChangeVideo={changeVideo}
             onGrant={targetId => {
               emit("control:grant", { userId: targetId });
