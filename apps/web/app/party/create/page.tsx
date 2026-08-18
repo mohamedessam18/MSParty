@@ -1,32 +1,56 @@
 "use client";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
-import { useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import { VideoLibrary, type LibraryVideo } from "@/components/video-library";
 import { VideoPicker, type PickedVideo } from "@/components/video-picker";
+import { YouTubePreview, type YouTubeMeta } from "@/components/youtube-preview";
 import { Button } from "@/components/ui/button";
 import { Card, Kicker } from "@/components/ui/card";
 import { Field, FormError, Input } from "@/components/ui/input";
 import { Rule, Wordmark } from "@/components/ui/wordmark";
 import { formatTime } from "@/components/room/types";
 
-type Chosen = { videoId: string; fileUrl: string; title: string; duration: number };
+type Chosen = { videoId: string; fileUrl: string; title: string; duration: number; posterUrl: string | null };
 
 export default function CreateParty() {
   const router = useRouter();
   const [name, setName] = useState("");
+  // Whether the host has written the name themselves. Until they do, picking a
+  // video fills it in for them; after, nothing overwrites what they typed.
+  const [nameTouched, setNameTouched] = useState(false);
   const [contentType, setContentType] = useState<"youtube" | "upload">("youtube");
   const [visibility, setVisibility] = useState<"private" | "friends" | "code">("friends");
   const [contentUrl, setContentUrl] = useState("");
+  const [youtube, setYoutube] = useState<YouTubeMeta | null>(null);
   const [chosen, setChosen] = useState<Chosen | null>(null);
   const [uploadBusy, setUploadBusy] = useState(false);
   const [libraryKey, setLibraryKey] = useState(0);
   const [error, setError] = useState("");
   const [creating, setCreating] = useState(false);
 
+  // "Watch it again" from the history list lands here with the video attached.
+  // Read off window rather than useSearchParams: the latter would force this
+  // whole page behind a Suspense boundary for one optional convenience.
+  useEffect(() => {
+    const params = new URLSearchParams(window.location.search);
+    const type = params.get("type");
+    if (type === "youtube" || type === "upload") setContentType(type);
+    const url = params.get("url");
+    if (url) setContentUrl(url);
+    const suggested = params.get("name");
+    if (suggested) setName(suggested.slice(0, 80));
+  }, []);
+
+  const suggestName = useCallback((title: string | null | undefined) => {
+    if (!title) return;
+    setName(current => (current.trim() ? current : title.slice(0, 80)));
+  }, []);
+
   function takeUploaded(video: PickedVideo) {
     setChosen(video);
     setLibraryKey(key => key + 1);
+    if (!nameTouched) suggestName(video.title);
   }
 
   function takeFromLibrary(video: LibraryVideo) {
@@ -34,14 +58,27 @@ export default function CreateParty() {
       videoId: video.id,
       fileUrl: video.fileUrl,
       title: video.title || "فيديو مرفوع",
-      duration: video.duration || 0
+      duration: video.duration || 0,
+      posterUrl: video.posterUrl
     });
+    if (!nameTouched) suggestName(video.title);
   }
+
+  const takeYouTube = useCallback(
+    (meta: YouTubeMeta | null) => {
+      setYoutube(meta);
+      if (!nameTouched) suggestName(meta?.title);
+    },
+    [nameTouched, suggestName]
+  );
 
   async function submit(event: React.FormEvent) {
     event.preventDefault();
     setError("");
     if (contentType === "upload" && !chosen) return setError("ارفع فيديو أو اختار واحد من مكتبتك.");
+    if (contentType === "youtube" && youtube?.detailed && !youtube.embeddable) {
+      return setError("الفيديو ده مش هيشتغل بره يوتيوب. اختار غيره.");
+    }
     setCreating(true);
     try {
       const response = await fetch("/api/parties", {
@@ -85,8 +122,16 @@ export default function CreateParty() {
 
         <Card className="mt-8 p-5 sm:p-7">
           <form onSubmit={submit} className="space-y-6">
-            <Field label="اسم السهرة">
-              <Input required placeholder="مثال: ليلة فيلم الجمعة" value={name} onChange={event => setName(event.target.value)} />
+            <Field label="اسم السهرة" hint="بيتملّى لوحده من الفيديو — غيّره زي ما تحب">
+              <Input
+                required
+                placeholder="مثال: ليلة فيلم الجمعة"
+                value={name}
+                onChange={event => {
+                  setNameTouched(true);
+                  setName(event.target.value);
+                }}
+              />
             </Field>
 
             <fieldset>
@@ -115,14 +160,21 @@ export default function CreateParty() {
             </fieldset>
 
             {contentType === "youtube" ? (
-              <Field label="رابط فيديو YouTube">
-                <Input required dir="ltr" placeholder="https://youtube.com/watch?v=…" value={contentUrl} onChange={event => setContentUrl(event.target.value)} />
-              </Field>
+              <div className="space-y-3">
+                <Field label="رابط فيديو YouTube">
+                  <Input required dir="ltr" placeholder="https://youtube.com/watch?v=…" value={contentUrl} onChange={event => setContentUrl(event.target.value)} />
+                </Field>
+                <YouTubePreview url={contentUrl} onMeta={takeYouTube} />
+              </div>
             ) : chosen ? (
               <div className="flex items-center gap-3 rounded-lg border border-gold/40 bg-gold/10 p-3">
-                <span aria-hidden className="text-xl text-gold">
-                  ▣
-                </span>
+                {chosen.posterUrl ? (
+                  <img src={chosen.posterUrl} alt="" className="h-12 w-20 shrink-0 rounded object-cover" />
+                ) : (
+                  <span aria-hidden className="flex h-12 w-20 shrink-0 items-center justify-center rounded bg-ink-deep text-xl text-gold">
+                    ▣
+                  </span>
+                )}
                 <div className="min-w-0 flex-1">
                   <b className="block truncate text-sm text-ivory">{chosen.title}</b>
                   {chosen.duration > 0 && <span className="text-xs text-ivory-dim">{formatTime(chosen.duration)}</span>}

@@ -3,7 +3,8 @@ import { getSignedUrl } from "@aws-sdk/s3-request-presigner";
 import { NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
 import { requireDbUser } from "@/lib/current-user";
-import { deleteR2Object, r2Client } from "@/lib/r2";
+import { deleteR2Object, putPoster, r2Client } from "@/lib/r2";
+import { cleanVideoTitle } from "@/lib/video-title";
 import { PART_SIZE, expectedParts } from "@/lib/upload-config";
 
 /** URLs are cheap but not free to sign; the client asks again for the rest. */
@@ -83,7 +84,7 @@ export async function PUT(request: Request, { params }: { params: { id: string }
   }
   if (!video.multipartId) return NextResponse.json({ message: "Not a multipart upload" }, { status: 400 });
 
-  const { duration, title } = await request.json().catch(() => ({}));
+  const { duration, title, poster } = await request.json().catch(() => ({}));
   const client = r2Client();
 
   try {
@@ -115,6 +116,13 @@ export async function PUT(request: Request, { params }: { params: { id: string }
       })
     );
 
+    // A missing thumbnail is not a failed upload — some codecs never fire the
+    // seek it is captured from — so this never throws out of the confirm.
+    const posterUrl =
+      typeof poster === "string" && poster.startsWith("data:image/")
+        ? await putPoster(poster, `posters/${video.uploaderId}/${video.id}.jpg`).catch(() => null)
+        : null;
+
     const ready = await prisma.uploadedVideo.update({
       where: { id: video.id },
       data: {
@@ -123,9 +131,12 @@ export async function PUT(request: Request, { params }: { params: { id: string }
         // Library items are kept until the owner deletes them.
         cleanupAt: null,
         duration: Number.isFinite(duration) && duration > 0 ? duration : null,
-        ...(typeof title === "string" && title.trim() ? { title: title.trim().slice(0, 120) } : {})
+        ...(posterUrl ? { posterUrl } : {}),
+        // The row was created with the raw filename so a resumed upload has
+        // something to show; this is where it becomes a readable name.
+        ...(typeof title === "string" && title.trim() ? { title: cleanVideoTitle(title.trim()) } : {})
       },
-      select: { id: true, title: true, duration: true, sizeBytes: true, fileUrl: true, uploadedAt: true }
+      select: { id: true, title: true, duration: true, posterUrl: true, sizeBytes: true, fileUrl: true, uploadedAt: true }
     });
     return NextResponse.json(ready);
   } catch (err: any) {
@@ -163,6 +174,12 @@ export async function DELETE(_: Request, { params }: { params: { id: string } })
     }
   } catch {
     // The object may already be gone; the row should still go.
+  }
+
+  if (video.posterUrl) {
+    // Derived from the video's own id, so there is nothing user-supplied to
+    // point it somewhere else.
+    await deleteR2Object(`posters/${video.uploaderId}/${video.id}.jpg`).catch(() => undefined);
   }
 
   await prisma.uploadedVideo.delete({ where: { id: video.id } });

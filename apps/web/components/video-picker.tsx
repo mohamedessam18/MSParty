@@ -3,9 +3,16 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { Button } from "./ui/button";
 import { FormError } from "./ui/input";
 import { formatBytes, formatEta, probeVideo, uploadVideo, type Probe, type UploadHandle, type UploadProgress } from "@/lib/upload-client";
+import { cleanVideoTitle } from "@/lib/video-title";
 import { formatTime } from "./room/types";
 
-export type PickedVideo = { videoId: string; fileUrl: string; title: string; duration: number };
+export type PickedVideo = {
+  videoId: string;
+  fileUrl: string;
+  title: string;
+  duration: number;
+  posterUrl: string | null;
+};
 
 /**
  * One picker used by both the create page and the room's host console, so the
@@ -53,11 +60,19 @@ export function VideoPicker({
   async function start() {
     if (!file || !probe?.playable) return;
     setError("");
-    const running = uploadVideo(file, { duration: probe.duration }, setProgress);
+    const running = uploadVideo(file, { duration: probe.duration, poster: probe.poster }, setProgress);
     handle.current = running;
     try {
-      const { videoId, fileUrl } = await running.promise;
-      onUploaded({ videoId, fileUrl, title: file.name, duration: probe.duration });
+      const { videoId, fileUrl, title, posterUrl } = await running.promise;
+      onUploaded({
+        videoId,
+        fileUrl,
+        // The server cleans the filename into something readable; fall back to
+        // the raw name only if it somehow declined to.
+        title: title || cleanVideoTitle(file.name),
+        duration: probe.duration,
+        posterUrl
+      });
       setFile(null);
       setProbe(null);
     } catch (err: any) {
@@ -122,7 +137,9 @@ export function VideoPicker({
             </span>
           )}
           <div className="min-w-0 flex-1">
-            <b className="block truncate text-sm text-ivory">{file.name}</b>
+            <b className="block truncate text-sm text-ivory" title={file.name}>
+              {cleanVideoTitle(file.name)}
+            </b>
             <span className="mt-0.5 block text-xs text-ivory-dim">
               {formatBytes(file.size)}
               {probe.duration > 0 && ` · ${formatTime(probe.duration)}`}

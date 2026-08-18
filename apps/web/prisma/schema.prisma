@@ -43,6 +43,38 @@ model User {
   blocksAgainst Block[] @relation("Blocked")
   pushSubscriptions PushSubscription[]
   usernameHolds UsernameHold[]
+  watchHistory WatchHistory[]
+}
+
+// What someone has watched, kept as a snapshot rather than a pointer: a party
+// is a room that gets torn down, but "the film we saw last Thursday" should
+// still be findable — and startable again — after the room is gone.
+model WatchHistory {
+  id String @id @default(cuid())
+  userId String
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+  // Nulled when the party is deleted, which is why every field below is copied
+  // instead of read through the relation.
+  partyId String?
+  party Party? @relation(fields: [partyId], references: [id], onDelete: SetNull)
+  partyName String
+  hostName String?
+  contentType String
+  contentUrl String?
+  title String
+  posterUrl String?
+  channel String?
+  durationSeconds Float?
+  // Where they stopped, so the row can offer to pick up rather than restart.
+  positionSeconds Float @default(0)
+  watchedAt DateTime @default(now())
+
+  // One row per party per person: revisiting a room updates its entry rather
+  // than stacking a second one. Postgres allows many NULLs here, so rows whose
+  // party has since been deleted no longer collide with each other.
+  @@unique([userId, partyId])
+  @@index([userId, watchedAt])
+  @@index([watchedAt])
 }
 
 // A released name is parked rather than freed, so nobody can pick up an
@@ -162,6 +194,14 @@ model Party {
   // Shared so everyone reads the same cues at the same speed.
   subtitlesUrl String?
   playbackRate Float @default(1)
+  // What is actually playing, as opposed to what the host called the room.
+  // Resolved once when the party is made — from the file for an upload, from
+  // YouTube for a link — so every later reader is free.
+  posterUrl String?
+  videoTitle String?
+  videoChannel String?
+  videoDescription String?
+  videoDuration Float?
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
   members PartyMember[]
@@ -169,6 +209,7 @@ model Party {
   queue QueueItem[]
   invites PartyInvite[]
   uploadedVideo UploadedVideo?
+  history WatchHistory[]
 }
 model QueueItem {
   id String @id @default(cuid())
@@ -214,6 +255,9 @@ model UploadedVideo {
   storageKey String @unique
   title String?
   duration Float?
+  // A frame lifted from the file in the browser before upload. Optional: some
+  // codecs never fire a seek, and a library row reads fine without it.
+  posterUrl String?
   // Float, not Int: the 2GB ceiling is one byte past Int32's range.
   sizeBytes Float?
   // "pending" until the bytes are confirmed uploaded, then "ready". Only ready

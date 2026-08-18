@@ -30,6 +30,8 @@ type Party = {
   name: string;
   contentType: string;
   contentUrl: string | null;
+  videoTitle?: string | null;
+  videoChannel?: string | null;
   hostId: string;
   isPlaying: boolean;
   isLocked: boolean;
@@ -107,6 +109,33 @@ export function PartyRoom({ party, userId }: { party: Party; userId: string }) {
 
   const call = useCall(socket, party.id, connected);
   const hostName = members.find(member => member.role === "host")?.name || "الهوست";
+
+  /**
+   * Keeps this person's watch-history entry pointing at where they actually got
+   * to, so the room can be left and picked up later. Held in a ref so the timer
+   * is not torn down and rebuilt on every tick of the clock.
+   */
+  const positionRef = useRef(0);
+  positionRef.current = currentTime;
+  useEffect(() => {
+    const report = () => {
+      // Under half a minute is someone glancing in, not watching.
+      if (positionRef.current < 30) return;
+      const body = JSON.stringify({ partyId: party.id, position: positionRef.current });
+      // A beacon survives the page going away, which a fetch started in an
+      // unload handler does not.
+      navigator.sendBeacon?.("/api/history", new Blob([body], { type: "application/json" }));
+    };
+    const timer = window.setInterval(report, 60000);
+    // pagehide, not beforeunload: phones background a tab and never come back
+    // to it, and beforeunload is unreliable there.
+    window.addEventListener("pagehide", report);
+    return () => {
+      window.clearInterval(timer);
+      window.removeEventListener("pagehide", report);
+      report();
+    };
+  }, [party.id]);
 
   /**
    * Drift correction multiplies the room's chosen speed rather than replacing
@@ -557,6 +586,15 @@ export function PartyRoom({ party, userId }: { party: Party; userId: string }) {
               ROOM · {party.code} {isLocked && "· 🔒"}
             </p>
             <h1 className="display mt-1 text-2xl text-ivory sm:text-3xl">{party.name}</h1>
+            {/* What is playing, when the host named the room something else.
+                Only shown while the original video is still up: swapping the
+                content mid-party leaves this metadata behind. */}
+            {party.videoTitle && party.videoTitle !== party.name && contentUrl === (party.contentUrl || "") && (
+              <p className="mt-1 max-w-xl text-sm leading-6 text-ivory-dim">
+                {party.videoTitle}
+                {party.videoChannel && <span className="text-ivory-dim/70"> · {party.videoChannel}</span>}
+              </p>
+            )}
           </div>
           <span className="rounded border border-velvet-hi bg-velvet px-3 py-1.5 text-sm text-ivory-dim">
             ◉ {members.length} معك الآن

@@ -125,7 +125,7 @@ export async function GET() {
     const videos = await prisma.uploadedVideo.findMany({
       where: { uploaderId: user.id, status: "ready" },
       orderBy: { uploadedAt: "desc" },
-      select: { id: true, title: true, duration: true, sizeBytes: true, fileUrl: true, partyId: true, uploadedAt: true }
+      select: { id: true, title: true, duration: true, posterUrl: true, sizeBytes: true, fileUrl: true, partyId: true, uploadedAt: true }
     });
     return NextResponse.json(videos);
   } catch {

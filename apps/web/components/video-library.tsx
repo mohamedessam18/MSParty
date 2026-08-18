@@ -9,6 +9,7 @@ export type LibraryVideo = {
   title: string | null;
   duration: number | null;
   sizeBytes: number | null;
+  posterUrl: string | null;
   fileUrl: string;
   partyId: string | null;
 };
@@ -53,9 +54,18 @@ export function VideoLibrary({
       <p className="text-sm text-ivory-dim">أو اختار من فيديوهاتك المرفوعة:</p>
       {videos.map(video => (
         <div key={video.id} className="flex items-center gap-3 rounded-lg border border-velvet-hi bg-velvet/50 p-3">
-          <span aria-hidden className="flex h-9 w-9 shrink-0 items-center justify-center rounded border border-gold/30 bg-gold/10 text-gold">
-            ▣
-          </span>
+          {video.posterUrl ? (
+            <img
+              src={video.posterUrl}
+              alt=""
+              loading="lazy"
+              className="h-10 w-16 shrink-0 rounded border border-velvet-hi object-cover"
+            />
+          ) : (
+            <span aria-hidden className="flex h-10 w-16 shrink-0 items-center justify-center rounded border border-gold/30 bg-gold/10 text-gold">
+              ▣
+            </span>
+          )}
           <div className="min-w-0 flex-1">
             <b className="block truncate text-sm text-ivory">{video.title || "فيديو بدون اسم"}</b>
             <span className="text-xs text-ivory-dim">

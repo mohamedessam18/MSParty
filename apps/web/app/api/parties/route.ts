@@ -6,6 +6,8 @@ import { generatePartyCode } from "@/lib/party-code";
 import { VISIBILITIES, type Visibility } from "@/lib/party-access";
 import { friendIdsOf } from "@/lib/friends";
 import { notifyFriendsLive } from "@/lib/notify";
+import { fetchYouTubeMeta } from "@/lib/youtube";
+import { recordWatch } from "@/lib/history";
 
 export async function GET() {
   try {
@@ -41,7 +43,44 @@ export async function POST(request: Request) {
     return NextResponse.json({ message: "Invalid party" }, { status: 400 });
   }
 
+  // Resolve what is actually playing once, here, rather than on every read.
+  // A failure to look it up is not a failure to create the party.
+  const details: {
+    posterUrl?: string | null;
+    videoTitle?: string | null;
+    videoChannel?: string | null;
+    videoDescription?: string | null;
+    videoDuration?: number | null;
+  } = {};
+
+  if (contentType === "youtube") {
+    const meta = await fetchYouTubeMeta(contentUrl || "");
+    if (!meta) return NextResponse.json({ message: "الرابط ده مش رابط يوتيوب صالح." }, { status: 400 });
+    // Only refuse on an authoritative answer. Without an API key we have no
+    // opinion, and guessing wrong would block a video that plays fine.
+    if (meta.detailed && !meta.embeddable) {
+      return NextResponse.json(
+        { message: "الفيديو ده صاحبه مانعه إنه يتشغّل بره يوتيوب، فمش هينفع في سهرة." },
+        { status: 400 }
+      );
+    }
+    details.posterUrl = meta.posterUrl;
+    details.videoTitle = meta.title || null;
+    details.videoChannel = meta.channel;
+    details.videoDescription = meta.description?.slice(0, 2000) || null;
+    details.videoDuration = meta.duration;
+  }
+
   try {
+    if (contentType === "upload") {
+      const source = await prisma.uploadedVideo.findFirst({
+        where: { id: uploadedVideoId, uploaderId: user.id },
+        select: { title: true, duration: true, posterUrl: true }
+      });
+      details.videoTitle = source?.title || null;
+      details.videoDuration = source?.duration ?? null;
+      details.posterUrl = source?.posterUrl || null;
+    }
 
     // Codes are short enough that collisions are possible; retry a few times
     // before giving up rather than failing the whole creation on one clash.
@@ -56,6 +95,7 @@ export async function POST(request: Request) {
               contentType,
               contentUrl,
               hostId: user.id,
+              ...details,
               members: { create: { userId: user.id, role: "host" } }
             }
           });
@@ -68,6 +108,10 @@ export async function POST(request: Request) {
           }
           return created;
         });
+
+        // The host is watching too; their own history should not wait for a
+        // second visit to the room.
+        await recordWatch(user.id, party.id).catch(() => undefined);
         // Friends hear about a room they can actually walk into; a private or
         // code-only one is nobody's business until they are invited.
         if (access === "friends") {

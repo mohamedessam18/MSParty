@@ -5,11 +5,24 @@ import { io, Socket } from "socket.io-client";
 import { Avatar } from "@/components/ui/avatar";
 import { Button } from "@/components/ui/button";
 import { Card, EmptyState, Kicker } from "@/components/ui/card";
+import { FormError } from "@/components/ui/input";
+import { Modal } from "@/components/ui/modal";
+import { HistoryList } from "@/components/history-list";
 
 type Person = { id: string; name: string; username: string | null; avatarUrl: string | null };
 type Live = { id: string; name: string; isPlaying: boolean; members: number; host: Person };
 type Invite = { id: string; party: { id: string; name: string; members: number }; from: Person };
-type Party = { id: string; code: string; name: string; contentType: string; host: { name: string }; _count: { members: number } };
+type Party = {
+  id: string;
+  code: string;
+  name: string;
+  contentType: string;
+  posterUrl: string | null;
+  videoTitle: string | null;
+  hostId: string;
+  host: { name: string };
+  _count: { members: number };
+};
 type Presence = { userId: string; online: boolean; partyId: string | null; partyName: string | null };
 
 const contentIcon: Record<string, string> = { youtube: "▶", upload: "▣" };
@@ -20,19 +33,49 @@ export function Feed() {
   const [friends, setFriends] = useState<Person[]>([]);
   const [parties, setParties] = useState<Party[]>([]);
   const [presence, setPresence] = useState<Record<string, Presence>>({});
+  const [me, setMe] = useState<string | null>(null);
   const [ready, setReady] = useState(false);
+  const [confirming, setConfirming] = useState<Party | null>(null);
+  const [removing, setRemoving] = useState(false);
+  const [removeError, setRemoveError] = useState("");
   const socket = useRef<Socket>();
 
   const load = useCallback(async () => {
     const response = await fetch("/api/feed");
     if (!response.ok) return setReady(true);
     const data = await response.json();
+    setMe(data.me);
     setLive(data.live);
     setInvites(data.invites);
     setFriends(data.friends);
     setParties(data.parties);
     setReady(true);
   }, []);
+
+  /**
+   * Two different actions behind one gesture: a host destroys the room, anyone
+   * else only removes themselves from it. Which one runs is decided by the
+   * server too — this just asks for the right thing and words it honestly.
+   */
+  async function removeParty(party: Party, asHost: boolean) {
+    setRemoving(true);
+    setRemoveError("");
+    try {
+      const response = await fetch(asHost ? `/api/parties/${party.id}` : `/api/parties/${party.id}/membership`, {
+        method: "DELETE"
+      });
+      if (!response.ok && response.status !== 204) {
+        const data = await response.json().catch(() => ({}));
+        throw new Error(data.message || "مش قادرين نعمل ده دلوقتي.");
+      }
+      setParties(list => list.filter(item => item.id !== party.id));
+      setConfirming(null);
+    } catch (cause) {
+      setRemoveError(cause instanceof Error ? cause.message : "حصلت مشكلة.");
+    } finally {
+      setRemoving(false);
+    }
+  }
 
   useEffect(() => {
     load();
@@ -146,29 +189,55 @@ export function Feed() {
       <section>
         <Kicker>سهراتي</Kicker>
         <div className="mt-3 grid gap-3">
-          {parties.map(party => (
-            <Link
-              key={party.id}
-              href={`/party/${party.id}`}
-              className="group flex items-center gap-4 rounded-lg border border-velvet-hi bg-velvet/60 p-4 transition hover:border-gold/50 hover:bg-velvet"
-            >
-              <span className="flex h-11 w-11 shrink-0 items-center justify-center rounded border border-gold/30 bg-gold/10 text-lg text-gold">
-                {contentIcon[party.contentType] ?? "◌"}
-              </span>
-              <span className="min-w-0 flex-1">
-                <b className="block truncate text-base text-ivory">{party.name}</b>
-                <span className="mt-1 block text-sm text-ivory-dim">
-                  {party._count.members} معك · {party.host.name}
+          {parties.map(party => {
+            const isHost = party.hostId === me;
+            return (
+              <div
+                key={party.id}
+                className="group flex items-center gap-3 rounded-lg border border-velvet-hi bg-velvet/60 p-3 transition hover:border-gold/50 hover:bg-velvet sm:gap-4 sm:p-4"
+              >
+                <Link href={`/party/${party.id}`} className="flex min-w-0 flex-1 items-center gap-3 sm:gap-4">
+                  {party.posterUrl ? (
+                    <img
+                      src={party.posterUrl}
+                      alt=""
+                      loading="lazy"
+                      className="h-11 w-16 shrink-0 rounded border border-velvet-hi object-cover"
+                    />
+                  ) : (
+                    <span className="flex h-11 w-16 shrink-0 items-center justify-center rounded border border-gold/30 bg-gold/10 text-lg text-gold">
+                      {contentIcon[party.contentType] ?? "◌"}
+                    </span>
+                  )}
+                  <span className="min-w-0 flex-1">
+                    <b className="block truncate text-base text-ivory">{party.name}</b>
+                    <span className="mt-1 block truncate text-sm text-ivory-dim">
+                      {party.videoTitle && party.videoTitle !== party.name
+                        ? party.videoTitle
+                        : `${party._count.members} معك · ${party.host.name}`}
+                    </span>
+                  </span>
+                </Link>
+
+                <span className="mono hidden shrink-0 rounded border border-velvet-hi px-2 py-1 text-xs tracking-widest text-gold sm:block">
+                  {party.code}
                 </span>
-              </span>
-              <span className="mono hidden shrink-0 rounded border border-velvet-hi px-2 py-1 text-xs tracking-widest text-gold sm:block">
-                {party.code}
-              </span>
-              <span aria-hidden className="text-gold transition group-hover:-translate-x-1">
-                ←
-              </span>
-            </Link>
-          ))}
+
+                <button
+                  type="button"
+                  onClick={() => {
+                    setRemoveError("");
+                    setConfirming(party);
+                  }}
+                  title={isHost ? "امسح البارتي" : "شيلها من عندي"}
+                  aria-label={isHost ? `امسح ${party.name}` : `شيل ${party.name} من عندي`}
+                  className="shrink-0 rounded px-2 py-1.5 text-ivory-dim transition hover:bg-curtain/10 hover:text-curtain"
+                >
+                  {isHost ? "🗑" : "✕"}
+                </button>
+              </div>
+            );
+          })}
           {ready && !parties.length && (
             <EmptyState
               icon="◌"
@@ -184,6 +253,56 @@ export function Feed() {
           )}
         </div>
       </section>
+
+      <section>
+        <div className="flex items-baseline justify-between gap-3">
+          <Kicker>اتفرجت عليه</Kicker>
+          <Link href="/history" className="text-xs text-ivory-dim transition hover:text-gold">
+            السجل كامل ←
+          </Link>
+        </div>
+        <div className="mt-3">
+          <HistoryList limit={5} />
+        </div>
+      </section>
+
+      <Modal
+        open={!!confirming}
+        onClose={() => !removing && setConfirming(null)}
+        title={confirming?.hostId === me ? "تمسح البارتي؟" : "تشيلها من عندك؟"}
+      >
+        {confirming && (
+          <div className="mt-5 space-y-4">
+            <p className="text-sm leading-7 text-ivory-dim">
+              {confirming.hostId === me ? (
+                <>
+                  «<b className="text-ivory">{confirming.name}</b>» هتتمسح للكل، ومعاها الشات وقايمة التشغيل. الفيديو
+                  المرفوع هيرجع لمكتبتك، والسهرة هتفضل في سجلك.
+                </>
+              ) : (
+                <>
+                  هتخرج من «<b className="text-ivory">{confirming.name}</b>» وهتختفي من لستتك. السهرة نفسها هتفضل شغّالة
+                  لباقي الناس، وتقدر ترجع بالكود.
+                </>
+              )}
+            </p>
+            {removeError && <FormError>{removeError}</FormError>}
+            <div className="flex gap-2">
+              <Button
+                variant="danger"
+                disabled={removing}
+                onClick={() => removeParty(confirming, confirming.hostId === me)}
+                className="flex-1"
+              >
+                {removing ? "لحظة..." : confirming.hostId === me ? "امسحها نهائي" : "شيلها"}
+              </Button>
+              <Button variant="ghost" disabled={removing} onClick={() => setConfirming(null)}>
+                رجوع
+              </Button>
+            </div>
+          </div>
+        )}
+      </Modal>
     </div>
   );
 }

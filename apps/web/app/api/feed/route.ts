@@ -40,11 +40,27 @@ export async function GET() {
       where: { members: { some: { userId: user.id } } },
       orderBy: { updatedAt: "desc" },
       take: 20,
-      include: { host: { select: { name: true } }, _count: { select: { members: true } } }
+      // Selected rather than included: the description runs to two thousand
+      // characters and has no business in a list of cards.
+      select: {
+        id: true,
+        code: true,
+        name: true,
+        contentType: true,
+        posterUrl: true,
+        videoTitle: true,
+        videoDuration: true,
+        hostId: true,
+        host: { select: { name: true } },
+        _count: { select: { members: true } }
+      }
     })
   ]);
 
   return NextResponse.json({
+    // The caller's own id, so the client can tell which parties it may delete
+    // rather than merely leave.
+    me: user.id,
     // Rooms a friend has open that you are allowed into, minus ones you are
     // already a member of — those belong under "your parties".
     live: open

@@ -67,7 +67,8 @@ export function probeVideo(file: File, timeoutMs = 20000): Promise<Probe> {
   });
 }
 
-export type UploadHandle = { promise: Promise<{ videoId: string; fileUrl: string }>; cancel: () => void };
+export type UploadResult = { videoId: string; fileUrl: string; title: string | null; posterUrl: string | null };
+export type UploadHandle = { promise: Promise<UploadResult>; cancel: () => void };
 export type UploadProgress = { sent: number; total: number; percent: number; bytesPerSecond: number; secondsLeft: number };
 
 const PARALLEL_PARTS = 3;
@@ -107,7 +108,7 @@ function recallUpload(file: File) {
  */
 export function uploadVideo(
   file: File,
-  meta: { duration: number },
+  meta: { duration: number; poster?: string | null },
   onProgress: (progress: UploadProgress) => void
 ): UploadHandle {
   const controller = new AbortController();
@@ -241,12 +242,14 @@ export function uploadVideo(
     const done = await fetch(`/api/uploads/${videoId}`, {
       method: "PUT",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ duration: meta.duration, title: file.name })
+      // The thumbnail rides along with the confirm rather than as its own
+      // upload: it is smaller than the round trip that would fetch a URL for it.
+      body: JSON.stringify({ duration: meta.duration, title: file.name, poster: meta.poster ?? null })
     });
     const ready = await done.json().catch(() => ({}));
     if (!done.ok) throw new Error(ready.message || "تعذر إنهاء الرفع.");
     forgetUpload(file);
-    return { videoId, fileUrl: ready.fileUrl as string };
+    return { videoId, fileUrl: ready.fileUrl as string, title: ready.title as string | null, posterUrl: ready.posterUrl as string | null };
   })();
 
   return { promise, cancel };
