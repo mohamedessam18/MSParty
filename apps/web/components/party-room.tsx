@@ -14,9 +14,10 @@ import { PeoplePanel } from "./room/people-panel";
 import { QueuePanel } from "./room/queue-panel";
 import { ReactionBar, ReactionLayer } from "./room/reaction-layer";
 import { StageOverlay } from "./room/stage-overlay";
+import { CameraBubbles } from "./room/camera-bubbles";
 import { SubtitleLayer } from "./room/subtitle-layer";
 import { useScreenWake } from "./room/use-screen-wake";
-import { useVoice } from "./room/use-voice";
+import { useCall } from "./room/use-call";
 import { VideoStage } from "./room/video-stage";
 import { VoiceBar } from "./room/voice-bar";
 import type { ControlRequest, FlyingReaction, Member, Message, QueueItem } from "./room/types";
@@ -93,6 +94,7 @@ export function PartyRoom({ party, userId }: { party: Party; userId: string }) {
   const [unread, setUnread] = useState(0);
   const [inviteOpen, setInviteOpen] = useState(false);
   const [notice, setNotice] = useState<string | null>(null);
+  const [fullscreen, setFullscreen] = useState(false);
 
   const [contentType, setContentType] = useState(party.contentType);
   const [contentUrl, setContentUrl] = useState(party.contentUrl || "");
@@ -103,7 +105,7 @@ export function PartyRoom({ party, userId }: { party: Party; userId: string }) {
   const [currentTime, setCurrentTime] = useState(0);
   const [duration, setDuration] = useState(0);
 
-  const voice = useVoice(socket, party.id, connected);
+  const call = useCall(socket, party.id, connected);
   const hostName = members.find(member => member.role === "host")?.name || "الهوست";
 
   /**
@@ -480,6 +482,12 @@ export function PartyRoom({ party, userId }: { party: Party; userId: string }) {
 
   useScreenWake(playing);
 
+  useEffect(() => {
+    const onChange = () => setFullscreen(!!document.fullscreenElement);
+    document.addEventListener("fullscreenchange", onChange);
+    return () => document.removeEventListener("fullscreenchange", onChange);
+  }, []);
+
   return (
     <main className="min-h-screen px-4 py-4 sm:px-6">
       <header className="mx-auto flex max-w-6xl flex-wrap items-center justify-between gap-3">
@@ -539,6 +547,16 @@ export function PartyRoom({ party, userId }: { party: Party; userId: string }) {
             subtitlesOn={subtitlesOn}
             onToggleSubtitles={() => setSubtitlesOn(value => !value)}
             subtitles={<SubtitleLayer url={subtitlesUrl} currentTime={currentTime} enabled={subtitlesOn} />}
+            cameras={
+              <CameraBubbles
+                compact
+                peers={call.peers}
+                localStream={call.localStream}
+                cameraOn={call.cameraOn}
+                speakingIds={call.speakingIds}
+                userId={userId}
+              />
+            }
             overlay={<StageOverlay messages={messages} onSend={sendMessage} onReact={react} />}
           />
           <ReactionLayer reactions={reactions} />
@@ -552,14 +570,16 @@ export function PartyRoom({ party, userId }: { party: Party; userId: string }) {
 
         <div className="mt-6">
           <VoiceBar
-            joined={voice.joined}
-            micMuted={voice.micMuted}
-            peers={voice.peers}
-            speakingIds={voice.speakingIds}
-            error={voice.error}
-            onJoin={voice.join}
-            onLeave={voice.leave}
-            onToggleMic={voice.toggleMic}
+            joined={call.joined}
+            micMuted={call.micMuted}
+            cameraOn={call.cameraOn}
+            peers={call.peers}
+            speakingIds={call.speakingIds}
+            error={call.error}
+            onJoin={call.join}
+            onLeave={call.leave}
+            onToggleMic={call.toggleMic}
+            onToggleCamera={call.toggleCamera}
           />
         </div>
 
@@ -631,9 +651,11 @@ export function PartyRoom({ party, userId }: { party: Party; userId: string }) {
             userId={userId}
             isHost={isHost}
             stalledIds={stalled.map(item => item.userId)}
-            speakingIds={voice.speakingIds}
+            speakingIds={call.speakingIds}
             onTransfer={targetId => emit("host:transfer", { userId: targetId })}
             onKick={targetId => emit("member:kick", { userId: targetId })}
+            cameraIds={call.peers.filter(peer => peer.hasVideo).map(peer => peer.userId)}
+            onDisableCamera={targetId => emit("camera:disable", { userId: targetId })}
           />
         )}
         {tab === "queue" && (
@@ -648,6 +670,15 @@ export function PartyRoom({ party, userId }: { party: Party; userId: string }) {
           />
         )}
       </section>
+
+      {/* Floating copies only outside fullscreen; inside it the stage owns the screen. */}
+      {!fullscreen && <CameraBubbles
+                peers={call.peers}
+                localStream={call.localStream}
+                cameraOn={call.cameraOn}
+                speakingIds={call.speakingIds}
+                userId={userId}
+              />}
 
       <InviteModal open={inviteOpen} onClose={() => setInviteOpen(false)} code={party.code} partyId={party.id} />
     </main>

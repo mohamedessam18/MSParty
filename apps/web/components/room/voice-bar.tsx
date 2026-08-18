@@ -1,10 +1,10 @@
 "use client";
 import { useEffect, useRef } from "react";
 import { Button } from "@/components/ui/button";
-import type { VoicePeer } from "./use-voice";
+import type { CallPeer } from "./use-call";
 
 /** Peer audio lives in real <audio> elements so the browser mixes it for us. */
-function PeerAudio({ peer }: { peer: VoicePeer }) {
+function PeerAudio({ peer }: { peer: CallPeer }) {
   const element = useRef<HTMLAudioElement>(null);
   useEffect(() => {
     if (element.current && element.current.srcObject !== peer.stream) {
@@ -18,21 +18,25 @@ function PeerAudio({ peer }: { peer: VoicePeer }) {
 export function VoiceBar({
   joined,
   micMuted,
+  cameraOn,
   peers,
   speakingIds,
   error,
   onJoin,
   onLeave,
-  onToggleMic
+  onToggleMic,
+  onToggleCamera
 }: {
   joined: boolean;
   micMuted: boolean;
-  peers: VoicePeer[];
+  cameraOn: boolean;
+  peers: CallPeer[];
   speakingIds: string[];
   error: string | null;
   onJoin: () => void;
   onLeave: () => void;
   onToggleMic: () => void;
+  onToggleCamera: () => void;
 }) {
   return (
     <div className="flex flex-wrap items-center justify-center gap-2 rounded-lg border border-velvet-hi bg-velvet/50 p-2">
@@ -48,6 +52,9 @@ export function VoiceBar({
         <>
           <Button size="sm" variant={micMuted ? "danger" : "primary"} onClick={onToggleMic}>
             {micMuted ? "🎙️ المايك مقفول" : "🎙️ المايك شغال"}
+          </Button>
+          <Button size="sm" variant={cameraOn ? "primary" : "ghost"} onClick={onToggleCamera}>
+            {cameraOn ? "📷 الكاميرا مفتوحة" : "📷 افتح الكاميرا"}
           </Button>
           <Button size="sm" variant="ghost" onClick={onLeave}>
             اخرج

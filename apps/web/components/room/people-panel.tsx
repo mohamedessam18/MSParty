@@ -9,16 +9,20 @@ export function PeoplePanel({
   isHost,
   stalledIds = [],
   speakingIds = [],
+  cameraIds = [],
   onTransfer,
-  onKick
+  onKick,
+  onDisableCamera
 }: {
   members: Member[];
   userId: string;
   isHost: boolean;
   stalledIds?: string[];
   speakingIds?: string[];
+  cameraIds?: string[];
   onTransfer: (userId: string) => void;
   onKick: (userId: string) => void;
+  onDisableCamera?: (userId: string) => void;
 }) {
   return (
     <div className="grid gap-2 p-3 sm:grid-cols-2">
@@ -52,6 +56,11 @@ export function PeoplePanel({
                 >
                   ★
                 </Button>
+                {cameraIds.includes(member.id) && onDisableCamera && (
+                  <Button size="sm" variant="ghost" onClick={() => onDisableCamera(member.id)} title="اقفل كاميرته">
+                    📷
+                  </Button>
+                )}
                 <Button size="sm" variant="danger" onClick={() => onKick(member.id)} title="اطرده من البارتي">
                   ✕
                 </Button>

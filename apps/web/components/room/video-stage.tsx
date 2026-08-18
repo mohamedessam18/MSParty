@@ -27,6 +27,7 @@ export type StageProps = {
   /** Rendered inside the stage, so it survives the fullscreen subtree. */
   overlay?: React.ReactNode;
   subtitles?: React.ReactNode;
+  cameras?: React.ReactNode;
   subtitlesUrl: string | null;
   subtitlesOn: boolean;
   onToggleSubtitles: () => void;
@@ -189,6 +190,7 @@ export const VideoStage = forwardRef<StageHandle, StageProps>(function VideoStag
         )}
 
         {props.subtitles}
+        {fullscreen && props.cameras}
 
         {/* Only mounted in fullscreen: outside it, the page's own panels are
             visible and a second copy would just duplicate them. */}

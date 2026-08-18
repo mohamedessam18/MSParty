@@ -86,6 +86,10 @@ function setPresenceRole(partyId: string, userId: string, role: string) {
   if (entry) entry.role = role;
 }
 
+/** Cameras currently open per party, so the mesh cap can be enforced centrally. */
+const cameras = new Map<string, Set<string>>();
+const MAX_CAMERAS = 6;
+
 /** Who in each party is still loading video, and since when. */
 const buffering = new Map<string, Map<string, { name: string; since: number }>>();
 
@@ -636,6 +640,34 @@ io.on("connection", rawSocket => {
     io.to(toSocketId).emit("voice:signal", { fromSocketId: socket.id, data });
   });
 
+  // Cameras are capped because the mesh cost is quadratic: every extra camera
+  // adds an upstream copy for every other participant.
+  socket.on("camera:on", ({ partyId }) => {
+    if (socket.partyId !== partyId) return;
+    const open = cameras.get(partyId) ?? new Set<string>();
+    cameras.set(partyId, open);
+    if (!open.has(socket.userId!) && open.size >= MAX_CAMERAS) {
+      return socket.emit("camera:blocked", { message: `أقصى عدد كاميرات مفتوحة ${MAX_CAMERAS}.` });
+    }
+    open.add(socket.userId!);
+    io.to(roomFor(partyId)).emit("camera:list", { userIds: [...open] });
+  });
+
+  socket.on("camera:off", ({ partyId }) => {
+    const open = cameras.get(partyId);
+    if (!open) return;
+    open.delete(socket.userId!);
+    if (!open.size) cameras.delete(partyId);
+    io.to(roomFor(partyId)).emit("camera:list", { userIds: [...open] });
+  });
+
+  socket.on("camera:disable", async ({ partyId, userId }) => {
+    if (!(await requireHost(socket, partyId))) return;
+    cameras.get(partyId)?.delete(userId);
+    io.to(userRoom(userId)).emit("camera:blocked", { message: "الهوست قفل كاميرتك." });
+    io.to(roomFor(partyId)).emit("camera:list", { userIds: [...(cameras.get(partyId) ?? [])] });
+  });
+
   socket.on("voice:speaking", ({ partyId, speaking }) => {
     socket.to(roomFor(partyId)).emit("voice:speaking", { userId: socket.userId, speaking: !!speaking });
   });
@@ -644,6 +676,11 @@ io.on("connection", rawSocket => {
     if (!socket.partyId || !socket.userId) return;
     socket.to(voiceRoom(socket.partyId)).emit("voice:peerLeft", { socketId: socket.id });
     setBuffering(socket.partyId, socket.userId, socket.userName || "", false);
+    const open = cameras.get(socket.partyId);
+    if (open?.delete(socket.userId)) {
+      if (!open.size) cameras.delete(socket.partyId);
+      io.to(roomFor(socket.partyId)).emit("camera:list", { userIds: [...open] });
+    }
     dropPresence(socket.partyId, socket.userId);
   });
 });
