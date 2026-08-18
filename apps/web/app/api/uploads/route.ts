@@ -14,6 +14,16 @@ const MAX_SUBTITLE = 2 * 1024 ** 2;
 
 
 export async function POST(request: Request) {
+  // Authenticate before anything else. Inside the try below, requireDbUser's
+  // throw was being handled as a server fault: an anonymous caller got a 500
+  // carrying the raw error string instead of a plain 401.
+  let user;
+  try {
+    user = await requireDbUser();
+  } catch {
+    return NextResponse.json({ message: "Unauthorized" }, { status: 401 });
+  }
+
   try {
     const { fileName, contentType, fileSize } = await request.json();
     const isVideo = !!contentType?.startsWith("video/");
@@ -44,7 +54,6 @@ export async function POST(request: Request) {
       );
     }
 
-    const user = await requireDbUser();
     const safeName = fileName.replace(/[^a-zA-Z0-9._-]/g, "_");
     const client = r2Client();
 
