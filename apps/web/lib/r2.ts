@@ -17,3 +17,16 @@ export function r2Client() {
 export async function deleteR2Object(storageKey: string) {
   await r2Client().send(new DeleteObjectCommand({ Bucket: process.env.R2_BUCKET, Key: storageKey }));
 }
+
+/**
+ * Turns one of our public URLs back into its storage key, but only when the key
+ * sits under `expectedPrefix`. Callers pass a prefix scoped to the acting user:
+ * avatarUrl is user-supplied, so without that check someone could point it at
+ * another person's upload and have us delete it on their next profile save.
+ */
+export function storageKeyFrom(url: string | null | undefined, expectedPrefix: string) {
+  const base = process.env.R2_PUBLIC_URL;
+  if (!base || !url || !url.startsWith(`${base}/`)) return null;
+  const key = url.slice(base.length + 1);
+  return key.startsWith(expectedPrefix) && !key.includes("..") ? key : null;
+}

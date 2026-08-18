@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
 import { requireUser } from "@/lib/current-user";
+import { deleteR2Object, storageKeyFrom } from "@/lib/r2";
 
 // Per-user response; never let it sit in a shared cache.
 export const dynamic = "force-dynamic";
@@ -38,7 +39,20 @@ export async function PATCH(request: Request) {
       data.avatarUrl = isStorableUrl ? avatarUrl : null;
     }
 
+    const previous = data.avatarUrl !== undefined
+      ? (await prisma.user.findUnique({ where: { id }, select: { avatarUrl: true } }))?.avatarUrl
+      : null;
+
     const updated = await prisma.user.update({ where: { id }, data, select: SELECT });
+
+    // Replaced avatars have no cleanup row of their own, so without this every
+    // change leaves the old image in the bucket permanently. Scoped to this
+    // user's own avatar folder — see storageKeyFrom.
+    if (previous && previous !== updated.avatarUrl) {
+      const key = storageKeyFrom(previous, `avatars/${id}/`);
+      if (key) await deleteR2Object(key).catch(() => undefined);
+    }
+
     return NextResponse.json(updated);
   } catch {
     return NextResponse.json({ message: "Unable to update profile" }, { status: 500 });

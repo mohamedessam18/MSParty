@@ -14,8 +14,20 @@ export async function POST(request: Request) {
     const isVideo = !!contentType?.startsWith("video/");
     const isImage = !!contentType?.startsWith("image/");
 
-    if (!fileName || (!isVideo && !isImage) || !Number.isFinite(fileSize)) {
-      return NextResponse.json({ message: "Only videos or images are allowed" }, { status: 400 });
+    if (!fileName || !Number.isFinite(fileSize)) {
+      return NextResponse.json({ message: "بيانات الملف ناقصة." }, { status: 400 });
+    }
+    if (!isVideo && !isImage) {
+      // Some containers (.mkv, .avi) come through with an empty type on certain
+      // systems, so say what actually went wrong instead of "not allowed".
+      return NextResponse.json(
+        {
+          message: contentType
+            ? "الملف ده مش فيديو ولا صورة."
+            : "المتصفح مش عارف نوع الملف ده. جرّب MP4 بترميز H.264."
+        },
+        { status: 400 }
+      );
     }
     if (fileSize > (isVideo ? MAX_VIDEO : MAX_IMAGE)) {
       return NextResponse.json(

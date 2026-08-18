@@ -30,27 +30,30 @@ export function HostConsole({
   onInvite: () => void;
   onToggleLock: () => void;
   onToggleWaitForAll: () => void;
-  onChangeVideo: (input: { url: string; file: File | null }) => Promise<void>;
+  onChangeVideo: (input: { url: string; file: File | null }, onProgress: (percent: number) => void) => Promise<void>;
   onGrant: (userId: string) => void;
   onDeny: (userId: string) => void;
 }) {
   const [url, setUrl] = useState("");
   const [file, setFile] = useState<File | null>(null);
   const [busy, setBusy] = useState(false);
+  const [progress, setProgress] = useState<number | null>(null);
   const [error, setError] = useState("");
 
   async function submit(event: React.FormEvent) {
     event.preventDefault();
     setError("");
     setBusy(true);
+    setProgress(file ? 0 : null);
     try {
-      await onChangeVideo({ url, file });
+      await onChangeVideo({ url, file }, setProgress);
       setUrl("");
       setFile(null);
     } catch (err: any) {
       setError(err?.message || "حدث خطأ أثناء تبديل الفيديو.");
     } finally {
       setBusy(false);
+      setProgress(null);
     }
   }
 
@@ -136,9 +139,14 @@ export function HostConsole({
             }}
           />
           <Button type="submit" disabled={busy} className="shrink-0">
-            {busy ? "جارٍ التبديل..." : "غيّر الفيديو"}
+            {busy ? (progress !== null ? `جارٍ الرفع (${progress}%)` : "جارٍ التبديل...") : "غيّر الفيديو"}
           </Button>
         </div>
+        {progress !== null && (
+          <div className="h-1.5 w-full overflow-hidden rounded-full bg-ink-deep">
+            <div className="h-full bg-gold transition-all duration-200" style={{ width: `${progress}%` }} />
+          </div>
+        )}
         {error && <FormError>{error}</FormError>}
       </form>
     </div>

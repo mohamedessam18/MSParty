@@ -120,7 +120,12 @@ export function PartyRoom({ party, userId }: { party: Party; userId: string }) {
       const isJoinSnapshot = !!incomingRole;
       if (isHostRef.current && !isJoinSnapshot && !authoritative) return;
 
-      const corrected = isPlaying ? timestamp + (Date.now() - serverTime) / 1000 : timestamp;
+      const raw = isPlaying ? timestamp + (Date.now() - serverTime) / 1000 : timestamp;
+      // A room left flagged as playing accumulates elapsed time without bound,
+      // so an old party can report a position hours past the runtime. Never
+      // seek beyond the end of the media we actually have.
+      const runtime = video.current?.duration || player.current?.duration() || 0;
+      const corrected = runtime > 0 ? Math.min(raw, runtime) : raw;
       const local = video.current ? video.current.currentTime || 0 : player.current?.currentTime() || 0;
       const drift = corrected - local;
 
@@ -386,7 +391,7 @@ export function PartyRoom({ party, userId }: { party: Party; userId: string }) {
   // every transient buffering report.
   const waitingFor = holding && stalled.length ? stalled.map(item => item.name).join("، ") : null;
 
-  async function changeVideo({ url, file }: { url: string; file: File | null }) {
+  async function changeVideo({ url, file }: { url: string; file: File | null }, onProgress: (percent: number) => void) {
     let nextUrl = url;
     let uploadedVideoId: string | undefined;
 
@@ -403,6 +408,9 @@ export function PartyRoom({ party, userId }: { party: Party; userId: string }) {
         const xhr = new XMLHttpRequest();
         xhr.open("PUT", data.uploadUrl);
         xhr.setRequestHeader("Content-Type", file.type || "video/mp4");
+        // A 2GB swap with no feedback looks like a frozen button.
+        xhr.upload.onprogress = event =>
+          event.lengthComputable && onProgress(Math.round((event.loaded / event.total) * 100));
         xhr.onload = () => (xhr.status >= 200 && xhr.status < 300 ? resolve() : reject(new Error("رفع الفيديو لم يكتمل.")));
         xhr.onerror = () => reject(new Error("خطأ في الشبكة أثناء الرفع."));
         xhr.send(file);

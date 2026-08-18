@@ -28,7 +28,18 @@ export async function DELETE(_: Request, { params }: { params: { id: string } })
     const user = await requireDbUser();
     const party = await prisma.party.findUnique({ where: { id: params.id }, select: { hostId: true } });
     if (!party || party.hostId !== user.id) return NextResponse.json({ message: "Forbidden" }, { status: 403 });
-    await prisma.party.delete({ where: { id: params.id } });
+
+    await prisma.$transaction([
+      // An attached video has cleanupAt = NULL, and the relation is SetNull, so
+      // deleting the party would leave a row the cleanup query can never match
+      // ({ cleanupAt: { lte: now } } never selects NULL) and the object would
+      // sit in R2 forever. Schedule it before the row loses its party.
+      prisma.uploadedVideo.updateMany({
+        where: { partyId: params.id },
+        data: { partyId: null, cleanupAt: new Date() }
+      }),
+      prisma.party.delete({ where: { id: params.id } })
+    ]);
     return new NextResponse(null, { status: 204 });
   } catch {
     return NextResponse.json({ message: "Unauthorized" }, { status: 401 });

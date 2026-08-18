@@ -33,12 +33,28 @@ export function VideoStage(props: StageProps) {
   const shell = useRef<HTMLDivElement>(null);
   const [volume, setVolume] = useState(100);
   const [fullscreen, setFullscreen] = useState(false);
+  const [chromeShown, setChromeShown] = useState(true);
+  const hideTimer = useRef<number>();
 
   useEffect(() => {
     const onChange = () => setFullscreen(!!document.fullscreenElement);
     document.addEventListener("fullscreenchange", onChange);
     return () => document.removeEventListener("fullscreenchange", onChange);
   }, []);
+
+  /** Show the bar, then fade it out again once the film is running undisturbed. */
+  const revealChrome = useCallback(() => {
+    setChromeShown(true);
+    window.clearTimeout(hideTimer.current);
+    // A paused video has nothing to get out of the way of, so the bar stays.
+    if (!playing) return;
+    hideTimer.current = window.setTimeout(() => setChromeShown(false), 2600);
+  }, [playing]);
+
+  useEffect(() => {
+    revealChrome();
+    return () => window.clearTimeout(hideTimer.current);
+  }, [revealChrome]);
 
   const applyVolume = useCallback(
     (next: number) => {
@@ -62,7 +78,15 @@ export function VideoStage(props: StageProps) {
 
   return (
     <div className="marquee-frame">
-      <div ref={shell} className="relative overflow-hidden bg-ink-deep">
+      <div
+        ref={shell}
+        className={`relative overflow-hidden bg-ink-deep ${chromeShown ? "" : "cursor-none"}`}
+        onMouseMove={revealChrome}
+        onMouseEnter={revealChrome}
+        onMouseLeave={() => playing && setChromeShown(false)}
+        // Touch has no hover, so a tap toggles the bar the way phone players do.
+        onTouchStart={() => (chromeShown ? setChromeShown(false) : revealChrome())}
+      >
         {ytError && (
           <div className="absolute inset-0 z-30 flex flex-col items-center justify-center bg-ink/95 p-6 text-center">
             <span aria-hidden className="text-3xl">
@@ -89,6 +113,9 @@ export function VideoStage(props: StageProps) {
             onPlay={() => isHost && props.onControl("play", props.videoRef.current?.currentTime || 0)}
             onPause={() => isHost && props.onControl("pause", props.videoRef.current?.currentTime || 0)}
             onSeeked={() => isHost && props.onControl("seek", props.videoRef.current?.currentTime || 0)}
+            // Without this the party stays "playing" past the end forever, and
+            // the server's live timestamp keeps growing past the runtime.
+            onEnded={() => isHost && props.onControl("pause", props.videoRef.current?.duration || 0)}
           />
         ) : (
           <div className="relative aspect-video w-full">
@@ -131,7 +158,13 @@ export function VideoStage(props: StageProps) {
           </div>
         )}
 
-        <div className="absolute inset-x-0 bottom-0 z-20 bg-gradient-to-t from-ink-deep via-ink-deep/70 to-transparent px-3 pb-3 pt-10 sm:px-4">
+        <div
+          onMouseEnter={() => window.clearTimeout(hideTimer.current)}
+          onMouseLeave={revealChrome}
+          className={`absolute inset-x-0 bottom-0 z-20 bg-gradient-to-t from-ink-deep via-ink-deep/70 to-transparent px-3 pb-3 pt-10 transition-opacity duration-300 sm:px-4 ${
+            chromeShown ? "opacity-100" : "pointer-events-none opacity-0"
+          }`}
+        >
           {isHost ? (
             <div className="mb-2 flex flex-wrap items-center gap-2 rounded-lg border border-velvet-hi bg-ink/90 p-2">
               <button

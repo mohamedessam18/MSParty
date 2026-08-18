@@ -136,6 +136,12 @@ export function YouTubePlayer({ videoId, enabled, onReady, onControl, onError, o
                   onControlRef.current("pause", playerInstance.getCurrentTime());
                 }
               }
+              // Reaching the end has to be reported, or the party stays flagged
+              // as playing and its live timestamp climbs past the runtime.
+              if (event.data === window.YT.PlayerState.ENDED) {
+                const end = typeof playerInstance?.getDuration === "function" ? playerInstance.getDuration() || 0 : 0;
+                onControlRef.current("pause", end);
+              }
             }
           }
         });
