@@ -4,6 +4,7 @@ import { NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
 import { requireDbUser } from "@/lib/current-user";
 import { deleteR2Object, r2Client } from "@/lib/r2";
+import { expectedParts } from "@/lib/upload-config";
 
 export const dynamic = "force-dynamic";
 
@@ -16,9 +17,12 @@ async function ownedUpload(id: string) {
 }
 
 /**
- * Hands back presigned URLs for the parts still missing, and reports which
- * parts R2 already holds. That listing is what makes a resume possible: after a
- * reload the browser has no memory of what it sent, but the bucket does.
+ * Hands back presigned URLs for the parts still missing, and reports which parts
+ * R2 already holds so they are not sent twice.
+ *
+ * Note this only skips parts within one upload session — the client starts a
+ * fresh multipart upload on every attempt, so a page reload still begins again.
+ * Surviving a reload would mean remembering the upload id in the browser.
  */
 export async function POST(request: Request, { params }: { params: { id: string } }) {
   let video;
@@ -87,6 +91,16 @@ export async function PUT(request: Request, { params }: { params: { id: string }
       .map(part => ({ PartNumber: part.PartNumber!, ETag: part.ETag! }))
       .sort((a, b) => a.PartNumber - b.PartNumber);
     if (!parts.length) return NextResponse.json({ message: "مفيش أجزاء مرفوعة." }, { status: 400 });
+
+    // Completing with a gap produces a file that plays and then simply stops
+    // partway, which is far worse than a failed upload. Refuse instead.
+    const needed = video.sizeBytes ? expectedParts(video.sizeBytes) : parts.length;
+    if (parts.length < needed) {
+      return NextResponse.json(
+        { message: `الرفع ناقص (${parts.length} من ${needed} أجزاء). جرّب تاني.` },
+        { status: 409 }
+      );
+    }
 
     await client.send(
       new CompleteMultipartUploadCommand({

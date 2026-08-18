@@ -1,7 +1,7 @@
 import "dotenv/config";
 import { createServer } from "node:http";
 import cors from "cors";
-import { DeleteObjectCommand, S3Client } from "@aws-sdk/client-s3";
+import { AbortMultipartUploadCommand, DeleteObjectCommand, S3Client } from "@aws-sdk/client-s3";
 import { PrismaClient } from "@prisma/client";
 import { jwtVerify } from "jose";
 import { Server, Socket } from "socket.io";
@@ -284,7 +284,9 @@ async function applyVideo(
     }
     return transaction.party.update({
       where: { id: partyId },
-      data: { contentType, contentUrl, isPlaying: false, currentTimestamp: 0 }
+      // A subtitle track belongs to one film. Carrying it over to the next one
+      // leaves the room reading lines from the wrong movie.
+      data: { contentType, contentUrl, isPlaying: false, currentTimestamp: 0, subtitlesUrl: null }
     });
   });
 }
@@ -343,7 +345,19 @@ async function cleanupExpiredUploads() {
   });
   for (const video of expired) {
     try {
-      await r2.send(new DeleteObjectCommand({ Bucket: process.env.R2_BUCKET, Key: video.storageKey }));
+      // An upload that never finished has no object yet — only stored parts,
+      // which DeleteObject does not touch and R2 keeps charging for.
+      if (video.multipartId) {
+        await r2.send(
+          new AbortMultipartUploadCommand({
+            Bucket: process.env.R2_BUCKET,
+            Key: video.storageKey,
+            UploadId: video.multipartId
+          })
+        );
+      } else {
+        await r2.send(new DeleteObjectCommand({ Bucket: process.env.R2_BUCKET, Key: video.storageKey }));
+      }
       await prisma.uploadedVideo.delete({ where: { id: video.id } });
     } catch {}
   }

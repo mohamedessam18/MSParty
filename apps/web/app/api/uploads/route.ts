@@ -4,14 +4,14 @@ import { NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
 import { requireDbUser } from "@/lib/current-user";
 import { r2Client } from "@/lib/r2";
+import { PART_SIZE, expectedParts } from "@/lib/upload-config";
 
 export const dynamic = "force-dynamic";
 
 const MAX_VIDEO = 2 * 1024 ** 3;
 const MAX_IMAGE = 5 * 1024 ** 2;
 const MAX_SUBTITLE = 2 * 1024 ** 2;
-/** 32MB parts: 2GB stays under S3's 10,000-part cap with room to spare. */
-const PART_SIZE = 32 * 1024 ** 2;
+
 
 export async function POST(request: Request) {
   try {
@@ -98,7 +98,7 @@ export async function POST(request: Request) {
       videoId: video.id,
       fileUrl: video.fileUrl,
       partSize: PART_SIZE,
-      partCount: Math.ceil(fileSize / PART_SIZE)
+      partCount: expectedParts(fileSize)
     });
   } catch (err: any) {
     console.error("Upload init error:", err);
