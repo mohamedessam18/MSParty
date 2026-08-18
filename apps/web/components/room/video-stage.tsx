@@ -168,6 +168,8 @@ export const VideoStage = forwardRef<StageHandle, StageProps>(function VideoStag
                 <p className="text-sm text-ivory-dim">{isHost ? "متوقف — شغّله لما تكونوا جاهزين" : "الهوست وقّف العرض"}</p>
               </div>
             )}
+
+            <YouTubeBadge videoId={videoId(contentUrl)} />
           </div>
         )}
 
@@ -289,6 +291,32 @@ function StageVolume({ volume, onChange }: { volume: number; onChange: (next: nu
         className="h-1.5 w-16 cursor-pointer accent-gold"
       />
     </div>
+  );
+}
+
+/**
+ * YouTube's own logo lives inside its control bar, which we hide, and the API
+ * has no way to keep just that one piece. So the attribution is ours: the mark
+ * plus a link back to the source, always visible rather than only on hover.
+ */
+function YouTubeBadge({ videoId }: { videoId: string }) {
+  return (
+    <a
+      href={`https://www.youtube.com/watch?v=${videoId}`}
+      target="_blank"
+      rel="noopener noreferrer"
+      title="اتفرج عليه على YouTube"
+      className="absolute left-3 top-3 z-20 flex items-center gap-1.5 rounded bg-ink-deep/70 px-2 py-1 opacity-80 transition hover:opacity-100"
+    >
+      <svg viewBox="0 0 28 20" className="h-4 w-[22px]" aria-hidden>
+        <path
+          fill="#FF0000"
+          d="M27.4 3.1A3.5 3.5 0 0 0 24.9.6C22.7 0 14 0 14 0S5.3 0 3.1.6A3.5 3.5 0 0 0 .6 3.1C0 5.3 0 10 0 10s0 4.7.6 6.9a3.5 3.5 0 0 0 2.5 2.5C5.3 20 14 20 14 20s8.7 0 10.9-.6a3.5 3.5 0 0 0 2.5-2.5c.6-2.2.6-6.9.6-6.9s0-4.7-.6-6.9Z"
+        />
+        <path fill="#fff" d="M11.2 14.3 18.4 10l-7.2-4.3v8.6Z" />
+      </svg>
+      <span className="text-[10px] font-semibold text-ivory">YouTube</span>
+    </a>
   );
 }
 
