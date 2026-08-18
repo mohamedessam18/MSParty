@@ -589,7 +589,9 @@ export function PartyRoom({ party, userId }: { party: Party; userId: string }) {
             subtitlesUrl={subtitlesUrl}
             subtitlesOn={subtitlesOn}
             onToggleSubtitles={() => setSubtitlesOn(value => !value)}
-            subtitles={<SubtitleLayer url={subtitlesUrl} currentTime={currentTime} enabled={subtitlesOn} />}
+            subtitles={raised => (
+              <SubtitleLayer url={subtitlesUrl} currentTime={currentTime} enabled={subtitlesOn} raised={raised} />
+            )}
             cameras={
               <CameraCorner
                 peers={call.peers}
@@ -599,7 +601,9 @@ export function PartyRoom({ party, userId }: { party: Party; userId: string }) {
                 userId={userId}
               />
             }
-            overlay={<StageOverlay messages={messages} onSend={sendMessage} onReact={react} />}
+            overlay={chromeShown => (
+              <StageOverlay messages={messages} chromeShown={chromeShown} onSend={sendMessage} onReact={react} />
+            )}
           />
           <ReactionLayer reactions={reactions} />
         </div>

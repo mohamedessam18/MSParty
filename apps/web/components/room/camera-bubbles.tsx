@@ -92,10 +92,11 @@ export function CameraCorner(props: CameraProps) {
   if (!tiles.length) return null;
   return (
     <div
-      className={`pointer-events-none absolute z-30 flex gap-2 ${
-        // Landscape phones are short: a column would run off the bottom, so the
-        // tiles lie along the top edge instead.
-        wide ? "right-3 top-3 flex-col" : "inset-x-3 top-3 flex-row overflow-x-auto"
+      // Anchored top-right in every case: top-left belongs to the YouTube mark
+      // and the centre to the transient banners. Landscape phones are short, so
+      // a column would run off the bottom — they get a capped scrolling row.
+      className={`pointer-events-none absolute right-3 top-3 z-30 flex gap-2 ${
+        wide ? "max-h-[70%] flex-col overflow-y-auto" : "max-w-[55vw] flex-row overflow-x-auto"
       }`}
     >
       {tiles.map(tile => (

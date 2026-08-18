@@ -10,11 +10,14 @@ import { cueAt, parseSubtitles, type Cue } from "@/lib/subtitles";
 export function SubtitleLayer({
   url,
   currentTime,
-  enabled
+  enabled,
+  raised = false
 }: {
   url: string | null;
   currentTime: number;
   enabled: boolean;
+  /** Lifts the line clear of the control bar while that bar is visible. */
+  raised?: boolean;
 }) {
   const [cues, setCues] = useState<Cue[]>([]);
 
@@ -34,7 +37,11 @@ export function SubtitleLayer({
   if (!line) return null;
 
   return (
-    <div className="pointer-events-none absolute inset-x-0 bottom-16 z-20 flex justify-center px-6 sm:bottom-20">
+    <div
+      className={`pointer-events-none absolute inset-x-0 z-20 flex justify-center px-6 transition-[bottom] duration-300 ${
+        raised ? "bottom-24 sm:bottom-28" : "bottom-8 sm:bottom-10"
+      }`}
+    >
       <p
         dir="auto"
         className="max-w-3xl whitespace-pre-line rounded bg-ink-deep/75 px-3 py-1.5 text-center text-base leading-relaxed text-ivory shadow-lift sm:text-xl"

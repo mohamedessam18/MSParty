@@ -180,8 +180,10 @@ export function YouTubePlayer({ videoId, enabled, onReady, onControl, onError, o
   }, [videoId, enabled]);
 
   return (
-    <div className="relative aspect-video w-full bg-black overflow-hidden rounded-[18px]">
-      <div ref={containerRef} className="w-full h-full" />
+    // Fills whatever the stage gives it: a 16:9 box on the page, the whole
+    // screen in fullscreen. Its own aspect ratio here would fight that.
+    <div className="relative h-full w-full overflow-hidden bg-black">
+      <div ref={containerRef} className="h-full w-full" />
     </div>
   );
 }

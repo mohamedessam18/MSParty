@@ -25,8 +25,9 @@ export type StageProps = {
   /** Fires once a player can accept a seek, so a queued join position lands. */
   onPlayerReady: () => void;
   /** Rendered inside the stage, so it survives the fullscreen subtree. */
-  overlay?: React.ReactNode;
-  subtitles?: React.ReactNode;
+  overlay?: (chromeShown: boolean) => React.ReactNode;
+  /** Given the current chrome state, so it can sit clear of the control bar. */
+  subtitles?: (raised: boolean) => React.ReactNode;
   cameras?: React.ReactNode;
   subtitlesUrl: string | null;
   subtitlesOn: boolean;
@@ -112,7 +113,11 @@ export const VideoStage = forwardRef<StageHandle, StageProps>(function VideoStag
     <div className="marquee-frame">
       <div
         ref={shell}
-        className={`relative overflow-hidden bg-ink-deep ${chromeShown ? "" : "cursor-none"}`}
+        className={`relative overflow-hidden bg-ink-deep ${chromeShown ? "" : "cursor-none"} ${
+          // Fullscreen makes this element the whole screen; without centring,
+          // the picture sits against the top edge with black below it.
+          fullscreen ? "flex h-full w-full items-center justify-center" : ""
+        }`}
         onMouseMove={revealChrome}
         onMouseEnter={revealChrome}
         onMouseLeave={() => playing && setChromeShown(false)}
@@ -137,7 +142,9 @@ export const VideoStage = forwardRef<StageHandle, StageProps>(function VideoStag
             playsInline
             preload="auto"
             controls={false}
-            className="pointer-events-none aspect-video w-full select-none bg-black object-contain"
+            className={`pointer-events-none select-none bg-black object-contain ${
+              fullscreen ? "h-full w-full" : "aspect-video w-full"
+            }`}
             onWaiting={() => props.onBuffering(true)}
             onPlaying={() => props.onBuffering(false)}
             onCanPlay={() => props.onBuffering(false)}
@@ -150,7 +157,7 @@ export const VideoStage = forwardRef<StageHandle, StageProps>(function VideoStag
             onEnded={() => isHost && props.onControl("pause", props.videoRef.current?.duration || 0)}
           />
         ) : (
-          <div className="relative aspect-video w-full">
+          <div className={`relative ${fullscreen ? "h-full max-h-full w-full" : "aspect-video w-full"}`}>
             <YouTubePlayer
               videoId={videoId(contentUrl)}
               enabled={isHost}
@@ -197,14 +204,16 @@ export const VideoStage = forwardRef<StageHandle, StageProps>(function VideoStag
           </button>
         )}
 
-        {props.subtitles}
+        {props.subtitles?.(chromeShown)}
         {fullscreen && props.cameras}
 
         {/* Only mounted in fullscreen: outside it, the page's own panels are
-            visible and a second copy would just duplicate them. */}
-        {fullscreen && props.overlay && (
-          <div className="pointer-events-none absolute inset-y-0 left-0 z-30 flex w-full max-w-sm flex-col justify-end p-3">
-            <div className="pointer-events-auto">{props.overlay}</div>
+            visible and a second copy would just duplicate them. Anchored above
+            the control bar — at z-30 over the bar's z-20 it used to cover the
+            transport buttons outright. */}
+        {fullscreen && !!props.overlay && (
+          <div className="pointer-events-none absolute bottom-24 left-3 z-30 sm:bottom-28">
+            <div className="pointer-events-auto">{props.overlay(chromeShown)}</div>
           </div>
         )}
 
@@ -213,7 +222,7 @@ export const VideoStage = forwardRef<StageHandle, StageProps>(function VideoStag
           onMouseLeave={revealChrome}
           className={`absolute inset-x-0 bottom-0 z-20 bg-gradient-to-t from-ink-deep via-ink-deep/70 to-transparent px-3 pb-3 pt-10 transition-opacity duration-300 sm:px-4 ${
             chromeShown ? "opacity-100" : "pointer-events-none opacity-0"
-          }`}
+          } ${fullscreen ? "pb-6 sm:px-8" : ""}`}
         >
           {isHost ? (
             <div className="mb-2 flex flex-wrap items-center gap-2 rounded-lg border border-velvet-hi bg-ink/90 p-2">
