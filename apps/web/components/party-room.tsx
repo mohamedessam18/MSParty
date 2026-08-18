@@ -606,6 +606,7 @@ export function PartyRoom({ party, userId }: { party: Party; userId: string }) {
         <div className="relative">
           {contentType === "platform" ? (
             <PlatformStage
+              partyId={party.id}
               platform={party.platform ?? null}
               contentUrl={contentUrl}
               title={party.videoTitle || party.name}

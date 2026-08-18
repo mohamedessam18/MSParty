@@ -1,3 +1,30 @@
-const input = (id: string) => document.getElementById(id) as HTMLInputElement; const status = document.getElementById("status")!;
-chrome.storage.local.get(["apiUrl", "syncUrl", "partyId"], value => { input("apiUrl").value = value.apiUrl || ""; input("syncUrl").value = value.syncUrl || ""; input("partyId").value = value.partyId || ""; });
-document.getElementById("save")!.addEventListener("click", async () => { try { const apiUrl = input("apiUrl").value.replace(/\/$/, ""); const response = await fetch(`${apiUrl}/api/auth/login`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ email: input("email").value, password: input("password").value }) }); if (!response.ok) throw new Error(); const { token } = await response.json(); await chrome.storage.local.set({ apiUrl, syncUrl: input("syncUrl").value, partyId: input("partyId").value, token }); chrome.runtime.sendMessage({ type: "connect" }); status.textContent = "تم الاتصال."; } catch { status.textContent = "تعذر تسجيل الدخول."; } });
+/**
+ * Status only. The old popup asked for an email and a password, which meant
+ * typing account credentials into a window with no address bar — exactly the
+ * shape of a phishing prompt, and impossible for anyone to verify. The session
+ * now comes from the website, where the URL is visible.
+ */
+const state = document.getElementById("state")!;
+
+function render(session: { partyId: string; siteOrigin: string } | null) {
+  if (!session) {
+    state.innerHTML = `
+      <span class="label">مش متصل بسهرة</span><br />
+      ابدأ من صفحة السهرة على موقع MSParty ودوس «افتح على المنصة».
+    `;
+    return;
+  }
+
+  state.classList.add("on");
+  state.innerHTML = `
+    <span class="label">متصل بسهرة</span><br />
+    <span class="value">${session.partyId.slice(-6).toUpperCase()}</span>
+    <button id="stop" type="button">اقطع الاتصال</button>
+  `;
+
+  document.getElementById("stop")!.addEventListener("click", () => {
+    chrome.runtime.sendMessage({ type: "stop" }, () => render(null));
+  });
+}
+
+chrome.runtime.sendMessage({ type: "session" }, session => render(session ?? null));

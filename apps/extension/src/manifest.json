@@ -1,1 +1,45 @@
-{"manifest_version":3,"name":"MSParty Sync","version":"0.1.0","description":"Synchronizes playback controls only; it never captures video or audio.","permissions":["storage","tabs"],"host_permissions":["https://www.netflix.com/*","https://shahid.mbc.net/*"],"background":{"service_worker":"background.js"},"content_scripts":[{"matches":["https://www.netflix.com/*","https://shahid.mbc.net/*"],"js":["content-script.js"]}],"action":{"default_popup":"popup.html"}}
+{
+  "manifest_version": 3,
+  "name": "MSParty",
+  "version": "0.2.0",
+  "description": "اتفرجوا مع بعض على نتفليكس وشاهد وديزني+. بيزامن التشغيل بس — مابيسجّلش ولا بينقل أي صورة أو صوت من الفيديو.",
+  "permissions": ["storage", "tabs"],
+  "host_permissions": [
+    "https://www.netflix.com/*",
+    "https://shahid.mbc.net/*",
+    "https://www.disneyplus.com/*",
+    "https://stream.osn.com/*",
+    "https://www.osnplus.com/*",
+    "https://www.primevideo.com/*",
+    "https://app.watchit.com/*",
+    "https://www.watchit.com/*",
+    "https://www.viu.com/*"
+  ],
+  "background": { "service_worker": "background.js" },
+  "content_scripts": [
+    {
+      "matches": [
+        "https://www.netflix.com/*",
+        "https://shahid.mbc.net/*",
+        "https://www.disneyplus.com/*",
+        "https://stream.osn.com/*",
+        "https://www.osnplus.com/*",
+        "https://www.primevideo.com/*",
+        "https://app.watchit.com/*",
+        "https://www.watchit.com/*",
+        "https://www.viu.com/*",
+        "https://ms-party-web-six.vercel.app/*",
+        "http://localhost:3000/*"
+      ],
+      "js": ["content-script.js"],
+      "run_at": "document_start"
+    }
+  ],
+  "web_accessible_resources": [
+    {
+      "resources": ["netflix-page.js"],
+      "matches": ["https://www.netflix.com/*"]
+    }
+  ],
+  "action": { "default_popup": "popup.html" }
+}
