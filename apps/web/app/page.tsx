@@ -1,4 +1,6 @@
 import Link from "next/link";
+import { getServerSession } from "next-auth";
+import { authOptions } from "@/lib/auth";
 import { Button } from "@/components/ui/button";
 import { Kicker } from "@/components/ui/card";
 import { Rule, Wordmark } from "@/components/ui/wordmark";
@@ -9,7 +11,7 @@ const steps = [
   { number: "03", title: "تتفرجوا في نفس اللحظة", copy: "الهوست بس اللي يتحكم، والباقي يعيشوا الفيلم سوا." }
 ];
 
-function Header() {
+function Header({ signedIn }: { signedIn: boolean }) {
   return (
     <header className="mx-auto flex max-w-6xl items-center justify-between px-5 py-6">
       <Wordmark />
@@ -17,9 +19,11 @@ function Header() {
         <Link href="/join" className="px-2 text-sm text-ivory-dim transition hover:text-ivory">
           ادخل بكود
         </Link>
-        <Link href="/login">
+        {/* Sending someone who is already signed in to a login form reads as a
+            lost session. Offer them their parties instead. */}
+        <Link href={signedIn ? "/dashboard" : "/login"}>
           <Button variant="ghost" size="sm">
-            تسجيل الدخول
+            {signedIn ? "بارتياتي" : "تسجيل الدخول"}
           </Button>
         </Link>
       </nav>
@@ -60,10 +64,13 @@ function ScreenPreview() {
   );
 }
 
-export default function Home() {
+export default async function Home() {
+  const session = await getServerSession(authOptions);
+  const signedIn = !!(session?.user as { id?: string } | undefined)?.id;
+
   return (
     <main className="min-h-screen">
-      <Header />
+      <Header signedIn={signedIn} />
 
       <section className="mx-auto grid max-w-6xl items-center gap-12 px-5 pb-16 pt-6 lg:grid-cols-[1.05fr_.95fr] lg:pt-12">
         <div>
@@ -81,8 +88,8 @@ export default function Home() {
             MSParty يخلي كل واحد فيكم قدام شاشته، بس كأنكم قاعدين في نفس الصف. الهوست يقود العرض، وأنتم تعيشوا كل لحظة مع بعض.
           </p>
           <div className="mt-8 flex flex-wrap gap-3">
-            <Link href="/party/create">
-              <Button size="lg">أنشئ بارتي</Button>
+            <Link href={signedIn ? "/party/create" : "/register"}>
+              <Button size="lg">{signedIn ? "أنشئ بارتي" : "ابدأ مجانًا"}</Button>
             </Link>
             <Link href="/join">
               <Button variant="ghost" size="lg">
