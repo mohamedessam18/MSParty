@@ -64,6 +64,11 @@ function runOnSite() {
 let overlay: HTMLIFrameElement | null = null;
 let applying = false;
 let adapter: Adapter | null = null;
+/** The last thing the room said, and whether this person gets to say it. */
+let room: RoomState | null = null;
+let isHost = false;
+
+type RoomState = { isPlaying: boolean; timestamp: number; serverTime: number; isHost?: boolean };
 
 /**
  * Hangs the room over the page. Same origin as the website, so it carries its
@@ -125,7 +130,10 @@ function followFullscreen() {
 }
 
 /** Where the room says everyone should be, in seconds. */
-function apply(state: { isPlaying: boolean; timestamp: number; serverTime: number }) {
+function apply(state: RoomState) {
+  room = state;
+  if (typeof state.isHost === "boolean") isHost = state.isHost;
+
   const video = adapter?.video();
   if (!video || !adapter) return;
 
@@ -149,6 +157,19 @@ function apply(state: { isPlaying: boolean; timestamp: number; serverTime: numbe
   }
 }
 
+/**
+ * Puts a viewer's player back where the room has it, now.
+ *
+ * The room already ignores what a viewer does — but ignoring it server-side
+ * means their own picture runs free until the next heartbeat arrives, so
+ * pressing play visibly worked for a second before being yanked back. Undoing
+ * it here costs no round trip, so the button simply does nothing instead.
+ */
+function enforce() {
+  if (isHost || applying || !room) return;
+  apply(room);
+}
+
 /** Tells the room what the person watching just did. Host-only; the overlay
  *  decides whether to forward it. */
 function report(kind: "play" | "pause" | "seek", seconds: number, origin: string) {
@@ -164,22 +185,26 @@ function watchPlayer(session: Session) {
   // Capturing listeners on the document: the <video> is replaced when the
   // service changes title, and rebinding to each new element would miss the
   // gap. Media events do not bubble, but they do capture.
-  document.addEventListener("play", event => {
+  const onAction = (kind: "play" | "pause" | "seek") => (event: Event) => {
     const video = event.target as HTMLVideoElement;
-    if (video?.tagName === "VIDEO") report("play", video.currentTime, session.siteOrigin);
-  }, true);
+    if (video?.tagName !== "VIDEO" || applying) return;
+    // The host drives the room; everyone else is put straight back.
+    if (isHost) report(kind, video.currentTime, session.siteOrigin);
+    else enforce();
+  };
 
-  document.addEventListener("pause", event => {
-    const video = event.target as HTMLVideoElement;
-    if (video?.tagName === "VIDEO") report("pause", video.currentTime, session.siteOrigin);
-  }, true);
+  document.addEventListener("play", onAction("play"), true);
+  document.addEventListener("pause", onAction("pause"), true);
 
   document.addEventListener("timeupdate", event => {
     const video = event.target as HTMLVideoElement;
     if (video?.tagName !== "VIDEO") return;
     // A jump larger than playback could account for is a seek. Ordinary
     // progress moves by well under a second per event.
-    if (Math.abs(video.currentTime - lastTime) > 2) report("seek", video.currentTime, session.siteOrigin);
+    if (!applying && Math.abs(video.currentTime - lastTime) > 2) {
+      if (isHost) report("seek", video.currentTime, session.siteOrigin);
+      else enforce();
+    }
     lastTime = video.currentTime;
   }, true);
 
@@ -201,7 +226,17 @@ function watchPlayer(session: Session) {
   // it. Cheap: one number a second, and only while something is playing.
   setInterval(() => {
     const video = adapter?.video();
-    if (!video || video.paused || !overlay?.contentWindow) return;
+    if (!video || !overlay?.contentWindow) return;
+
+    // A safety net behind the event handlers. Some players change track without
+    // firing anything we listen for, and a viewer who slips through would
+    // otherwise stay adrift until the next heartbeat.
+    if (!isHost && room && !applying) {
+      const target = room.isPlaying ? room.timestamp + (Date.now() - room.serverTime) / 1000 : room.timestamp;
+      if (video.paused === room.isPlaying || Math.abs(video.currentTime - target) > 1.5) enforce();
+    }
+
+    if (video.paused) return;
     overlay.contentWindow.postMessage(
       { source: "msparty-extension", type: "position", seconds: video.currentTime },
       session.siteOrigin

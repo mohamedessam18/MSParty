@@ -43,6 +43,9 @@ export function OverlayClient({ partyId }: { partyId: string }) {
   const socket = useRef<Socket>();
   /** Where the page actually is, reported back by the content script. */
   const localTime = useRef(0);
+  /** Read inside socket handlers, which close over the state they were built
+   *  with — the page must never be told the wrong person is driving. */
+  const roleRef = useRef("viewer");
 
   const isHost = role === "host";
   const call = useCall(socket, partyId, connected);
@@ -97,14 +100,29 @@ export function OverlayClient({ partyId }: { partyId: string }) {
     client.on("error:unauthorized", ({ message }: { message: string }) => setFault(message));
 
     const onState = (state: SyncState) => {
-      if (state.role) setRole(state.role);
+      // Only the join reply carries a role; heartbeats do not, so it is kept
+      // rather than re-read, and every message repeats it to the page.
+      if (state.role) {
+        roleRef.current = state.role;
+        setRole(state.role);
+      }
       setPlaying(state.isPlaying);
       const target = state.isPlaying ? state.timestamp + (Date.now() - state.serverTime) / 1000 : state.timestamp;
       setDrift(localTime.current ? target - localTime.current : 0);
-      toPage({ type: "state", state });
+      // The page enforces this on a viewer's own player, so it has to be told
+      // who is driving — otherwise it either fights the host or lets everyone
+      // scrub.
+      toPage({ type: "state", state: { ...state, isHost: roleRef.current === "host" } });
     };
     client.on("sync:state", onState);
     client.on("sync:heartbeat", onState);
+
+    // Handing over the room mid-film changes who may touch the player.
+    client.on("party:hostChanged", ({ hostId }: { hostId: string }) => {
+      const mine = JSON.parse(atob(token.split(".")[1] || "e30="))?.sub;
+      roleRef.current = hostId === mine ? "host" : "viewer";
+      setRole(roleRef.current);
+    });
 
     client.on("party:presence", ({ members: present }: { members: Member[] }) => setMembers(present));
     client.on("chat:message", (message: Message) => setMessages(list => [...list, message]));
@@ -147,9 +165,8 @@ export function OverlayClient({ partyId }: { partyId: string }) {
         localTime.current = event.data.seconds;
         return;
       }
-      // Only the host's actions become the room's. A viewer pressing pause
-      // pauses their own tab, and the next heartbeat pulls them back — exactly
-      // as it works in the website's own room.
+      // Only the host's actions become the room's — and only the host sends
+      // any: the page puts a viewer's player straight back instead of asking.
       if (event.data.type !== "control" || !isHost || !socket.current) return;
       const { kind, seconds } = event.data;
       if (kind !== "play" && kind !== "pause" && kind !== "seek") return;
