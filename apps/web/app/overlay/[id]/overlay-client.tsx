@@ -4,6 +4,7 @@ import { io, Socket } from "socket.io-client";
 import { ChatPanel } from "@/components/room/chat-panel";
 import { useCall } from "@/components/room/use-call";
 import { REACTIONS, type FlyingReaction, type Member, type Message } from "@/components/room/types";
+import { parsePlatformLink } from "@/lib/platforms";
 import { Avatar } from "@/components/ui/avatar";
 import { Mark } from "@/components/ui/logo";
 
@@ -47,6 +48,12 @@ export function OverlayClient({ partyId }: { partyId: string }) {
   /** Null until the page has told us; false means this tab is on something else. */
   const [onRightVideo, setOnRightVideo] = useState<boolean | null>(null);
   const [autoplayBlocked, setAutoplayBlocked] = useState(false);
+  /** The link this tab is on, so the host can hand it to the party. */
+  const [here, setHere] = useState<string | null>(null);
+  const [suggestion, setSuggestion] = useState<{ userId: string; name: string; url: string } | null>(null);
+  const [pasting, setPasting] = useState(false);
+  const [draftUrl, setDraftUrl] = useState("");
+  const [changeError, setChangeError] = useState("");
   const [fault, setFault] = useState<string | null>(null);
   const [userId, setUserId] = useState("");
   const socket = useRef<Socket>();
@@ -134,6 +141,10 @@ export function OverlayClient({ partyId }: { partyId: string }) {
     });
 
     client.on("party:presence", ({ members: present }: { members: Member[] }) => setMembers(present));
+    // Only ever delivered to the host.
+    client.on("platform:suggested", (incoming: { userId: string; name: string; url: string }) =>
+      setSuggestion(incoming)
+    );
     client.on("chat:message", (message: Message) => setMessages(list => [...list, message]));
     client.on("chat:typing", ({ name }: { name: string }) => {
       setTyping(list => (list.includes(name) ? list : [...list, name]));
@@ -179,6 +190,10 @@ export function OverlayClient({ partyId }: { partyId: string }) {
       }
       if (event.data.type === "page") {
         setOnRightVideo(event.data.matches);
+        setHere(event.data.current ?? null);
+        // The host's list of who came along is built from what each tab
+        // reports about itself; nothing else knows where anyone is.
+        socket.current?.emit("platform:where", { partyId, following: event.data.matches });
         return;
       }
       if (event.data.type === "autoplay-blocked") {
@@ -197,9 +212,27 @@ export function OverlayClient({ partyId }: { partyId: string }) {
   }, [isHost, partyId]);
 
   const send = (text: string) => socket.current?.emit("chat:send", { partyId, message: text });
+
+  /**
+   * Moves the whole party to another link. Host only, and platform only: the
+   * panel lives inside a streaming page, so switching to YouTube or an upload
+   * would leave it hanging over a site the party is no longer on.
+   */
+  function moveParty(url: string) {
+    const link = parsePlatformLink(url);
+    if (!link.ok) return setChangeError(link.message);
+    setChangeError("");
+    socket.current?.emit("control:changeVideo", { partyId, contentType: "platform", contentUrl: link.url });
+    setSuggestion(null);
+    setPasting(false);
+    setDraftUrl("");
+  }
   const react = (emoji: string) => socket.current?.emit("reaction:send", { partyId, emoji });
 
   const watching = useMemo(() => members.filter(member => member.id !== userId), [members, userId]);
+  // Explicitly false, not merely falsy: undefined means a tab that has not
+  // reported yet, and calling those people late would be wrong.
+  const behind = useMemo(() => watching.filter(member => member.following === false), [watching]);
   const offBy = Math.abs(drift);
 
   if (fault) {
@@ -281,18 +314,80 @@ export function OverlayClient({ partyId }: { partyId: string }) {
         </button>
       </header>
 
-      {/* The most consequential thing this panel can say. A position synced
-          between two different episodes looks exactly like everything working. */}
+      {/* The same fact reads two completely different ways depending on who is
+          looking at it: the host has wandered off and can take everyone along,
+          a viewer has wandered off and needs to come back. */}
       {onRightVideo === false && (
         <div className="border-b border-curtain/40 bg-curtain/10 px-3 py-2.5">
-          <p className="text-[11px] leading-5 text-curtain">إنت على حاجة تانية غير اللي الشلة بتتفرج عليها.</p>
-          <button
-            type="button"
-            onClick={() => toPage({ type: "navigate" })}
-            className="mt-1.5 w-full rounded border border-curtain/50 bg-curtain/10 py-1.5 text-[11px] text-curtain transition hover:bg-curtain/20"
-          >
-            وديني عندهم
-          </button>
+          {isHost ? (
+            <>
+              <p className="text-[11px] leading-5 text-gold">إنت فاتح حاجة تانية. تنقل الشلة معاك؟</p>
+              <div className="mt-1.5 flex gap-1.5">
+                <button
+                  type="button"
+                  onClick={() => here && moveParty(here)}
+                  className="flex-1 rounded border border-gold/50 bg-gold/15 py-1.5 text-[11px] text-gold transition hover:bg-gold/25"
+                >
+                  انقل الشلة هنا
+                </button>
+                <button
+                  type="button"
+                  onClick={() => toPage({ type: "navigate" })}
+                  className="rounded border border-velvet-hi px-2 py-1.5 text-[11px] text-ivory-dim transition hover:text-ivory"
+                >
+                  رجّعني
+                </button>
+              </div>
+            </>
+          ) : (
+            <>
+              <p className="text-[11px] leading-5 text-curtain">إنت على حاجة تانية غير اللي الشلة بتتفرج عليها.</p>
+              <div className="mt-1.5 flex gap-1.5">
+                <button
+                  type="button"
+                  onClick={() => toPage({ type: "navigate" })}
+                  className="flex-1 rounded border border-curtain/50 bg-curtain/10 py-1.5 text-[11px] text-curtain transition hover:bg-curtain/20"
+                >
+                  وديني عندهم
+                </button>
+                <button
+                  type="button"
+                  onClick={() => here && socket.current?.emit("platform:suggest", { partyId, url: here })}
+                  title="ابعت اللي إنت فاتحه للهوست"
+                  className="rounded border border-velvet-hi px-2 py-1.5 text-[11px] text-ivory-dim transition hover:border-gold/40 hover:text-gold"
+                >
+                  اقترحها
+                </button>
+              </div>
+            </>
+          )}
+          {changeError && <p className="mt-1.5 text-[11px] text-curtain">{changeError}</p>}
+        </div>
+      )}
+
+      {/* Reaches the host and nobody else. */}
+      {suggestion && isHost && (
+        <div className="border-b border-gold/25 bg-gold/[.07] px-3 py-2.5">
+          <p className="text-[11px] leading-5 text-ivory">
+            <b className="text-gold">{suggestion.name}</b> بيقترح تتفرجوا على حاجة تانية.
+          </p>
+          <p dir="ltr" className="mt-1 truncate text-[10px] text-ivory-dim">{suggestion.url}</p>
+          <div className="mt-1.5 flex gap-1.5">
+            <button
+              type="button"
+              onClick={() => moveParty(suggestion.url)}
+              className="flex-1 rounded border border-gold/50 bg-gold/15 py-1.5 text-[11px] text-gold transition hover:bg-gold/25"
+            >
+              وافق وانقل الكل
+            </button>
+            <button
+              type="button"
+              onClick={() => setSuggestion(null)}
+              className="rounded border border-velvet-hi px-2 py-1.5 text-[11px] text-ivory-dim transition hover:text-ivory"
+            >
+              لأ
+            </button>
+          </div>
         </div>
       )}
 
@@ -314,8 +409,19 @@ export function OverlayClient({ partyId }: { partyId: string }) {
 
       <div className="flex items-center gap-1.5 overflow-x-auto border-b border-velvet-hi px-3 py-2 [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
         {members.map(member => (
-          <span key={member.id} title={member.name} className="relative shrink-0">
-            <Avatar name={member.name} src={member.avatarUrl} size="sm" />
+          <span
+            key={member.id}
+            title={`${member.name}${member.following === false ? " · لسه مالحقش" : ""}`}
+            className="relative shrink-0"
+          >
+            <Avatar
+              name={member.name}
+              src={member.avatarUrl}
+              size="sm"
+              // Dimmed rather than hidden: the host needs to see who is missing
+              // from the film, not a shorter list that hides them.
+              className={member.following === false ? "opacity-35" : ""}
+            />
             {member.role === "host" && (
               <span className="absolute -bottom-0.5 -left-0.5 h-2 w-2 rounded-full border border-ink bg-gold" title="الهوست" />
             )}
@@ -323,6 +429,62 @@ export function OverlayClient({ partyId }: { partyId: string }) {
         ))}
         {!watching.length && <span className="text-[11px] text-ivory-dim">لسه لوحدك</span>}
       </div>
+
+      {/* Named, not counted. "2 of 4" tells the host to wait; a list tells them
+          who to nudge in the chat. Only worth the room while someone is behind. */}
+      {isHost && !!behind.length && (
+        <p className="border-b border-velvet-hi px-3 py-1.5 text-[11px] leading-5 text-ivory-dim">
+          لسه مالحقوش: <b className="text-ivory">{behind.map(member => member.name).join("، ")}</b>
+        </p>
+      )}
+
+      {isHost && (
+        <div className="border-b border-velvet-hi px-3 py-2">
+          {pasting ? (
+            <form
+              onSubmit={event => {
+                event.preventDefault();
+                moveParty(draftUrl);
+              }}
+              className="flex gap-1.5"
+            >
+              <input
+                autoFocus
+                dir="ltr"
+                value={draftUrl}
+                onChange={event => setDraftUrl(event.target.value)}
+                placeholder="الزق رابط من أي منصة"
+                className="min-w-0 flex-1 rounded border border-velvet-hi bg-ink px-2 py-1.5 text-[11px] text-ivory outline-none focus:border-gold/60"
+              />
+              <button type="submit" className="rounded border border-gold/40 bg-gold/10 px-2 text-[11px] text-gold">
+                انقل
+              </button>
+              <button
+                type="button"
+                onClick={() => {
+                  setPasting(false);
+                  setChangeError("");
+                }}
+                className="rounded px-1.5 text-[11px] text-ivory-dim hover:text-ivory"
+              >
+                ✕
+              </button>
+            </form>
+          ) : (
+            <button
+              type="button"
+              onClick={() => setPasting(true)}
+              className="w-full rounded border border-velvet-hi py-1.5 text-[11px] text-ivory-dim transition hover:border-gold/40 hover:text-gold"
+            >
+              غيّر اللي بتتفرجوا عليه
+            </button>
+          )}
+          {/* Only here when the banner above is not already carrying it. */}
+          {changeError && onRightVideo !== false && (
+            <p className="mt-1.5 text-[11px] text-curtain">{changeError}</p>
+          )}
+        </div>
+      )}
 
       <div className="min-h-0 flex-1">
         <ChatPanel

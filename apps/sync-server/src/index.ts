@@ -68,7 +68,18 @@ type PartySocket = Socket & {
  * from the database shows everyone who ever joined as though they were still
  * in the room.
  */
-type Present = { count: number; name: string; avatarUrl: string | null; role: string; isGuest: boolean };
+type Present = {
+  count: number;
+  name: string;
+  avatarUrl: string | null;
+  role: string;
+  isGuest: boolean;
+  /**
+   * Whether this person's tab is on the film the party is on. Undefined for
+   * anyone in the website's own room, where there is nowhere else to be.
+   */
+  following?: boolean;
+};
 const presence = new Map<string, Map<string, Present>>();
 
 function publishPresence(partyId: string) {
@@ -80,7 +91,8 @@ function publishPresence(partyId: string) {
           name: entry.name,
           avatarUrl: entry.avatarUrl,
           role: entry.role,
-          isGuest: entry.isGuest
+          isGuest: entry.isGuest,
+          following: entry.following
         }))
       : []
   });
@@ -90,8 +102,10 @@ function addPresence(partyId: string, userId: string, who: Omit<Present, "count"
   const party = presence.get(partyId) ?? new Map<string, Present>();
   presence.set(partyId, party);
   const existing = party.get(userId);
-  // A second tab must not announce the person twice.
-  party.set(userId, { ...who, count: (existing?.count ?? 0) + 1 });
+  // A second tab must not announce the person twice. Whether they are on the
+  // right page is carried over: it is reported separately and would otherwise
+  // reset to unknown every time another tab of theirs connected.
+  party.set(userId, { following: existing?.following, ...who, count: (existing?.count ?? 0) + 1 });
   publishPresence(partyId);
 }
 
@@ -560,6 +574,42 @@ io.on("connection", rawSocket => {
   socket.on("control:seek", ({ partyId, timestamp }) =>
     control(socket, partyId, { currentTimestamp: Number(timestamp) || 0 })
   );
+  /**
+   * Says whether this tab is on the party's film. Only meaningful for platform
+   * parties, where everyone is on a site we do not control and can wander off
+   * it — the host needs to know who actually came along before starting.
+   */
+  socket.on("platform:where", async ({ partyId, following }) => {
+    const party = presence.get(partyId);
+    const entry = party?.get(socket.userId!);
+    if (!entry || entry.following === !!following) return;
+    entry.following = !!following;
+    publishPresence(partyId);
+  });
+
+  /**
+   * A viewer putting something forward. It reaches the host and nobody else:
+   * broadcasting it would let any member fill everyone's panel with links.
+   */
+  socket.on("platform:suggest", async ({ partyId, url }) => {
+    const member = await memberFor(socket, partyId);
+    if (!member) return socket.emit("error:unauthorized", { message: "مش عضو في البارتي ده" });
+    if (typeof url !== "string" || !platformForUrl(url)) {
+      return socket.emit("error:unauthorized", { message: "الرابط ده مش من منصة مدعومة" });
+    }
+    // Rate-limited with the same clock as chat: a suggestion is a message.
+    if ((socket.lastChatAt || 0) > Date.now() - 800) return;
+    socket.lastChatAt = Date.now();
+
+    const party = await prisma.party.findUnique({ where: { id: partyId }, select: { hostId: true } });
+    if (!party) return;
+    io.to(userRoom(party.hostId)).emit("platform:suggested", {
+      userId: socket.userId,
+      name: socket.userName,
+      url: normalisePlatformUrl(url)
+    });
+  });
+
   socket.on("control:changeVideo", ({ partyId, contentType, contentUrl, uploadedVideoId }) =>
     changeVideo(socket, partyId, contentType, contentUrl, uploadedVideoId)
   );

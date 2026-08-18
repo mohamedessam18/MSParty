@@ -1,4 +1,16 @@
-export type Member = { id: string; name: string; avatarUrl?: string | null; role: string; isGuest?: boolean };
+export type Member = {
+  id: string;
+  name: string;
+  avatarUrl?: string | null;
+  role: string;
+  isGuest?: boolean;
+  /**
+   * Whether this person's tab is on the party's film. Undefined in the
+   * website's own room, where there is nowhere else for them to be — only a
+   * platform party can have someone present but watching something else.
+   */
+  following?: boolean;
+};
 /** userId is null once the author has erased their account; the line stays so
  *  the conversation around it still reads, but it points at nobody. */
 export type Message = { userId: string | null; name: string; message: string; sentAt: string; avatarUrl?: string | null };

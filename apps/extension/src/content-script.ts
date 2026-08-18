@@ -109,7 +109,14 @@ function checkPage(origin: string) {
   const matches = sameVideo(location.href, expected);
   if (matches === lastVerdict) return;
   lastVerdict = matches;
-  overlay.contentWindow.postMessage({ source: "msparty-extension", type: "page", matches, expected }, origin);
+  // Reported every time it flips, both ways: the host's list of who came along
+  // is only useful if leaving shows up as fast as arriving. The current link
+  // rides along, because the host moves the party by handing over the page they
+  // are already on — a link they cannot get wrong.
+  overlay.contentWindow.postMessage(
+    { source: "msparty-extension", type: "page", matches, expected, current: location.href },
+    origin
+  );
 }
 
 /**
