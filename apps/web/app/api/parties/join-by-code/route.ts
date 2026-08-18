@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
 import { requireDbUser } from "@/lib/current-user";
 import { normalizePartyCode } from "@/lib/party-code";
+import { areFriends } from "@/lib/friends";
 
 export async function POST(request: Request) {
   let user;
@@ -15,7 +16,7 @@ export async function POST(request: Request) {
   const clean = normalizePartyCode(String(code || ""));
   if (!clean) return NextResponse.json({ message: "اكتب كود البارتي." }, { status: 400 });
 
-  const party = await prisma.party.findUnique({ where: { code: clean }, select: { id: true, isLocked: true } });
+  const party = await prisma.party.findUnique({ where: { code: clean }, select: { id: true, isLocked: true, friendsOnly: true, hostId: true } });
   if (!party) return NextResponse.json({ message: "مفيش بارتي بالكود ده." }, { status: 404 });
 
   const existing = await prisma.partyMember.findUnique({
@@ -26,6 +27,9 @@ export async function POST(request: Request) {
   // newcomers, so a reconnect or refresh never locks someone out of their party.
   if (!existing && party.isLocked) {
     return NextResponse.json({ message: "البارتي مقفول ومش بيستقبل حد جديد." }, { status: 403 });
+  }
+  if (!existing && party.friendsOnly && !(await areFriends(party.hostId, user.id))) {
+    return NextResponse.json({ message: "البارتي ده لأصدقاء الهوست بس." }, { status: 403 });
   }
 
   if (!existing) {

@@ -2,11 +2,12 @@ import { NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
 import { requireUser } from "@/lib/current-user";
 import { deleteR2Object, storageKeyFrom } from "@/lib/r2";
+import { USERNAME_PATTERN, normalizeUsername } from "@/lib/friends";
 
 // Per-user response; never let it sit in a shared cache.
 export const dynamic = "force-dynamic";
 
-const SELECT = { id: true, name: true, email: true, avatarUrl: true, isGuest: true } as const;
+const SELECT = { id: true, name: true, email: true, avatarUrl: true, isGuest: true, username: true, createdAt: true } as const;
 
 export async function GET() {
   try {
@@ -22,10 +23,25 @@ export async function GET() {
 export async function PATCH(request: Request) {
   try {
     const { id } = await requireUser();
-    const { name, avatarUrl } = await request.json();
+    const { name, avatarUrl, username } = await request.json();
 
-    const data: { name?: string; avatarUrl?: string | null } = {};
+    const data: { name?: string; avatarUrl?: string | null; username?: string } = {};
     if (typeof name === "string" && name.trim()) data.name = name.trim().slice(0, 50);
+
+    if (username !== undefined) {
+      const clean = normalizeUsername(String(username || ""));
+      if (!USERNAME_PATTERN.test(clean)) {
+        return NextResponse.json(
+          { message: "اسم المستخدم: 3 لـ 20 حرف إنجليزي صغير أو رقم أو _" },
+          { status: 400 }
+        );
+      }
+      const taken = await prisma.user.findUnique({ where: { username: clean }, select: { id: true } });
+      if (taken && taken.id !== id) {
+        return NextResponse.json({ message: "الاسم ده محجوز." }, { status: 409 });
+      }
+      data.username = clean;
+    }
 
     if (avatarUrl !== undefined) {
       // Reject data: URIs outright. A failed upload used to fall back to an

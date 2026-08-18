@@ -14,6 +14,9 @@ model User {
   email String? @unique
   passwordHash String?
   isGuest Boolean @default(false)
+  // How people find each other. Null until chosen, and never set for guests —
+  // a guest session cannot be signed back into, so being findable is pointless.
+  username String? @unique
   name String
   avatarUrl String?
   createdAt DateTime @default(now())
@@ -23,6 +26,27 @@ model User {
   uploads UploadedVideo[]
   queueItems QueueItem[]
   queueVotes QueueVote[]
+  sentRequests Friendship[] @relation("FriendRequester")
+  receivedRequests Friendship[] @relation("FriendAddressee")
+}
+
+// One row per pair, holding both the pending request and the settled
+// friendship. Storing it once rather than twice keeps the two directions from
+// ever disagreeing about whether a friendship exists.
+model Friendship {
+  id String @id @default(cuid())
+  requesterId String
+  requester User @relation("FriendRequester", fields: [requesterId], references: [id], onDelete: Cascade)
+  addresseeId String
+  addressee User @relation("FriendAddressee", fields: [addresseeId], references: [id], onDelete: Cascade)
+  // pending | accepted
+  status String @default("pending")
+  createdAt DateTime @default(now())
+  respondedAt DateTime?
+
+  @@unique([requesterId, addresseeId])
+  @@index([addresseeId, status])
+  @@index([requesterId, status])
 }
 model Party {
   id String @id @default(cuid())
@@ -35,6 +59,8 @@ model Party {
   currentTimestamp Float @default(0)
   isPlaying Boolean @default(false)
   isLocked Boolean @default(false)
+  // Lets the host's friends walk in without a code.
+  friendsOnly Boolean @default(false)
   // Shared so everyone reads the same cues at the same speed.
   subtitlesUrl String?
   playbackRate Float @default(1)

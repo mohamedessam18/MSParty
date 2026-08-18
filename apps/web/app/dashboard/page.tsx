@@ -146,14 +146,14 @@ export default function Dashboard() {
             <Button size="sm">اعمل بارتي</Button>
           </Link>
           {user && (
-            <button
-              onClick={openProfile}
-              title="تعديل البروفايل"
+            <Link
+              href="/profile"
+              title="البروفايل والأصدقاء"
               className="flex items-center gap-2 rounded border border-velvet-hi bg-velvet px-2 py-1.5 transition hover:border-gold/50"
             >
               <Avatar name={user.name} src={user.avatarUrl} size="sm" />
               <span className="max-w-24 truncate text-xs font-semibold text-ivory">{user.name}</span>
-            </button>
+            </Link>
           )}
           <Button variant="danger" size="sm" onClick={() => signOut({ callbackUrl: "/" })}>
             خروج
