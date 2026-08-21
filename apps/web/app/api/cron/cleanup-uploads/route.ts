@@ -6,6 +6,7 @@ import { releaseExpiredHolds } from "@/lib/username-claim";
 import { accountsDueForErasure, eraseAccount, sendDeletionReminders } from "@/lib/account-deletion";
 import { pruneRateLimits } from "@/lib/rate-limit";
 import { pruneVerificationTokens } from "@/lib/email-verification";
+import { pruneTvDevices } from "@/lib/tv-pairing";
 
 export const dynamic = "force-dynamic";
 
@@ -27,11 +28,12 @@ export async function GET(request: Request) {
   // The other things that expire on a clock. Bundled here rather than given
   // their own schedules: each is one cheap statement, and one job is one thing
   // to watch.
-  const [history, holds, limits, tokens] = await Promise.all([
+  const [history, holds, limits, tokens, televisions] = await Promise.all([
     pruneHistory().catch(() => ({ count: 0 })),
     releaseExpiredHolds().catch(() => ({ count: 0 })),
     pruneRateLimits().catch(() => ({ count: 0 })),
-    pruneVerificationTokens().catch(() => ({ count: 0 }))
+    pruneVerificationTokens().catch(() => ({ count: 0 })),
+    pruneTvDevices().catch(() => ({ count: 0 }))
   ]);
 
   // Before the erasure loop, so an account crossing both lines on the same
@@ -57,6 +59,7 @@ export async function GET(request: Request) {
     holds: holds.count,
     limits: limits.count,
     tokens: tokens.count,
+    televisions: televisions.count,
     reminded: reminders.sent,
     erased
   });

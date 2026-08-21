@@ -155,6 +155,46 @@
     50% { opacity: 0.35; }
   }
 
+  /* --- Ten feet away ------------------------------------------------------
+     A television is read from across a room and driven with four arrows and an
+     OK button. Neither of those is a smaller phone, so the TV routes opt into
+     their own scale rather than inheriting the app's.
+
+     Sizes are in rem against a root the .tv scope sets, so one number moves the
+     whole screen. The safe inset is for overscan: a good number of sets still
+     crop a few percent off every edge, and anything in that band is simply not
+     on the picture. */
+  .tv {
+    font-size: 24px;
+    /* Rounded off the largest overscan seen in the wild rather than the
+       average: being slightly inside the bezel costs nothing, being outside it
+       loses the text. */
+    --tv-safe: 4vmin;
+  }
+
+  .tv-safe {
+    padding: var(--tv-safe);
+  }
+
+  /* Focus on a television is not a hint, it is the cursor — it has to be
+     findable from the sofa, so it is a filled state and not an outline. */
+  .tv :focus-visible,
+  .tv [data-focused="true"] {
+    outline: none;
+    background: theme(colors.gold.DEFAULT);
+    color: theme(colors.ink.DEFAULT);
+    box-shadow: 0 0 0 6px rgb(201 162 39 / 0.28);
+  }
+
+  /* The pairing code: the one thing on screen that gets read out loud. */
+  .tv-code {
+    font-family: theme(fontFamily.mono);
+    font-size: clamp(3rem, 12vw, 9rem);
+    letter-spacing: 0.16em;
+    line-height: 1;
+    color: theme(colors.gold.lit);
+    text-shadow: 0 0 40px rgb(232 194 80 / 0.35);
+  }
 }
 
 @media (prefers-reduced-motion: reduce) {

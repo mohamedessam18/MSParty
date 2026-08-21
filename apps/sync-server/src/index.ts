@@ -57,6 +57,8 @@ const voiceRoom = (partyId: string) => `voice:${partyId}`;
 type PartySocket = Socket & {
   userId?: string;
   userName?: string;
+  /** "tv" for a paired television, which may watch and nothing else. */
+  scope?: string;
   partyId?: string;
   lastChatAt?: number;
   lastReactionAt?: number;
@@ -240,8 +242,27 @@ async function evaluateHold(partyId: string) {
 async function tokenUser(token: string) {
   const { payload } = await jwtVerify(token, secret);
   if (typeof payload.sub !== "string" || typeof payload.name !== "string") throw new Error("Invalid token");
-  return { id: payload.sub, name: payload.name };
+  return {
+    id: payload.sub,
+    name: payload.name,
+    scope: typeof payload.scope === "string" ? payload.scope : undefined
+  };
 }
+
+/**
+ * The only things a television is allowed to say.
+ *
+ * A paired set holds its credential in local storage on a device with no lock
+ * screen, sitting in a room other people walk through. It is a viewer by
+ * design — the phone that paired it is the remote — so rather than trusting the
+ * TV client not to send anything else, the server refuses everything that is
+ * not on this list.
+ *
+ * An allowlist and not a blocklist: a new event added later should arrive shut
+ * to televisions and be opened deliberately, not arrive open because nobody
+ * remembered this file existed.
+ */
+const TV_EVENTS = new Set(["join-party"]);
 
 const memberFor = (socket: PartySocket, partyId: string) =>
   prisma.partyMember.findUnique({ where: { partyId_userId: { partyId, userId: socket.userId! } } });
@@ -470,6 +491,7 @@ io.use(async (socket, next) => {
 
     (socket as PartySocket).userId = user.id;
     (socket as PartySocket).userName = user.name;
+    (socket as PartySocket).scope = user.scope;
     next();
   } catch {
     next(new Error("Unauthorized"));
@@ -479,6 +501,16 @@ io.use(async (socket, next) => {
 io.on("connection", rawSocket => {
   const socket = rawSocket as PartySocket;
   socket.join(userRoom(socket.userId!));
+
+  // Runs before every handler on this socket. The packet is dropped rather than
+  // passed on, so a television that somehow sends a control event changes
+  // nothing and is told why.
+  if (socket.scope === "tv") {
+    socket.use(([event], next) => {
+      if (TV_EVENTS.has(event)) return next();
+      socket.emit("error:unauthorized", { message: "التليفزيون بيتفرج بس" });
+    });
+  }
 
   // Being connected at all is enough to count as online — a person browsing
   // their dashboard is as present as one sitting in a room.

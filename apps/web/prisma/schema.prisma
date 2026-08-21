@@ -43,6 +43,7 @@ model User {
   avatarUrl String?
   createdAt DateTime @default(now())
   accounts Account[]
+  tvDevices TvDevice[]
   hostedParties Party[] @relation("HostedParties")
   memberships PartyMember[]
   messages ChatMessage[]
@@ -89,6 +90,41 @@ model Account {
 
   @@unique([provider, providerAccountId])
   @@index([userId])
+}
+
+// A television that has been handed an account, once.
+//
+// A TV browser is driven by a four-way remote, so signing in on it means typing
+// an address and a password with an on-screen keyboard — the single worst input
+// method in the house. Instead the set shows a code, a phone that is already
+// signed in claims it, and the set keeps the resulting credential.
+//
+// The row is the credential: whoever holds `secret` can ask for a sync token
+// for `user` at any time, which is why it is stored hashed, scoped to one
+// party, and revocable from the phone that created it.
+model TvDevice {
+  id String @id @default(cuid())
+  // Shown on the television, read out loud, typed into a phone. Same alphabet
+  // as a party code — no characters that are confused at six feet.
+  code String @unique
+  // sha256 of the secret the set was handed. Never stored in the clear.
+  secretHash String @unique
+  // Null until a phone claims it. Both are set together.
+  userId String?
+  user User? @relation(fields: [userId], references: [id], onDelete: Cascade)
+  partyId String?
+  party Party? @relation(fields: [partyId], references: [id], onDelete: SetNull)
+  // What the set calls itself, for the "your televisions" list on the phone.
+  label String?
+  claimedAt DateTime?
+  lastSeenAt DateTime?
+  // Minutes while it is an unclaimed code on a screen, months once it is a
+  // television someone owns.
+  expiresAt DateTime
+  createdAt DateTime @default(now())
+
+  @@index([userId])
+  @@index([expiresAt])
 }
 
 // A one-time link mailed to an address to prove it belongs to whoever asked.
@@ -259,6 +295,7 @@ model Party {
   code String @unique
   hostId String
   host User @relation("HostedParties", fields: [hostId], references: [id])
+  tvDevices TvDevice[]
   name String
   // youtube | upload | platform. A platform party is watched on the service's
   // own site through the extension; contentUrl holds the deep link to it.

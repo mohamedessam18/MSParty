@@ -35,6 +35,18 @@ Three ways in, all landing on the same `User` row:
 
 Attempt counters for all three live in the `RateLimit` table rather than in memory: the web app is serverless, so a per-instance counter resets often enough to be no limit at all.
 
+## Televisions
+
+`/tv` is the ten-foot screen: full-bleed video, type sized to be read across a room, and a control surface of exactly one button — OK shows the chat and who is watching, Back hides it.
+
+It is a strict viewer. The set never emits a control event, and its sync token carries `scope: "tv"`, which the socket server refuses for everything except joining. A paired set keeps a bearer secret in local storage on a device with no lock screen, so that scope is what keeps a stolen one from pausing a film for everyone.
+
+Pairing goes the other way round from signing in, because a remote with four arrows is not a keyboard: the television shows a code, and a phone that is already signed in claims it at `/tv/link`. After that the phone points the set at a party — from `/tv/link`, or the 📺 button in any room — and the set switches within a few seconds, on its own.
+
+Only YouTube parties and uploaded videos play there. Platform parties are driven by the browser extension, and televisions do not run extensions; a set pointed at one says so.
+
+`browserslist` in `apps/web/package.json` exists for these: webOS and Tizen ship Chromium several years behind desktop, and the default build target compiles syntax they cannot parse.
+
 ## Deleting an account
 
 Pressing delete hides the account immediately and schedules erasure 30 days out. "Hidden" is enforced, not decorative — it drops out of friend lists, search, the feed, notifications and party rosters, its profile 404s, its socket connection is refused, and its name in old chat lines reads "مستخدم محذوف".

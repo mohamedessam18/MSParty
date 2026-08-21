@@ -15,6 +15,7 @@ import { QueuePanel } from "./room/queue-panel";
 import { ReactionBar, ReactionLayer } from "./room/reaction-layer";
 import { StageOverlay } from "./room/stage-overlay";
 import { CameraBubbles, CameraCorner, CameraStrip } from "./room/camera-bubbles";
+import { CastToTv } from "./room/cast-to-tv";
 import { SubtitleLayer } from "./room/subtitle-layer";
 import { useScreenWake } from "./room/use-screen-wake";
 import { useCall } from "./room/use-call";
@@ -24,11 +25,9 @@ import { VoiceBar } from "./room/voice-bar";
 import type { ControlRequest, FlyingReaction, Member, Message, QueueItem } from "./room/types";
 import { parseSubtitles, toVtt } from "@/lib/subtitles";
 import type { StageHandle } from "./room/video-stage";
-
-/** Drift thresholds, in seconds. */
-const HARD_SEEK = 5; // beyond this, catching up gradually would take too long
-const NUDGE = 0.35; // beyond this, lean on playback rate
-const SETTLED = 0.15; // inside this, run at normal speed
+// Shared with the television, which has to make the same judgement about being
+// out of step — see components/room/drift.ts.
+import { HARD_SEEK, NUDGE, SETTLED } from "./room/drift";
 
 type Party = {
   id: string;
@@ -571,9 +570,12 @@ export function PartyRoom({ party, userId }: { party: Party; userId: string }) {
           <span className={`h-2 w-2 rounded-full ${connected ? "animate-soft-pulse bg-gold" : "bg-curtain"}`} />
           <span className="hidden sm:inline">{connected ? "متصل بالسهرة" : "جارٍ إعادة الاتصال"}</span>
         </div>
-        <Button size="sm" variant="ghost" onClick={() => setInviteOpen(true)}>
-          ادعُ صحابك
-        </Button>
+        <div className="flex items-center gap-2">
+          <CastToTv partyId={party.id} platform={contentType === "platform"} />
+          <Button size="sm" variant="ghost" onClick={() => setInviteOpen(true)}>
+            ادعُ صحابك
+          </Button>
+        </div>
       </header>
 
       {notice && (
