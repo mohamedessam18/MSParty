@@ -8,5 +8,7 @@ dist
 .pnpm-store
 .DS_Store
 .node
-
-
+# Editor and assistant settings, which are per-machine and full of local paths.
+.claude
+# This is a pnpm workspace — an npm lockfile here fights pnpm-lock.yaml.
+package-lock.json
