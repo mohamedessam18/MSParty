@@ -2,7 +2,7 @@ import bcrypt from "bcryptjs";
 import { prisma } from "./prisma";
 import { mailConfigured, sendMail } from "./mail";
 import { changeEmailTemplate, resetPasswordTemplate } from "./mail-templates";
-import { consumeFound, findToken, issueToken, spendToken } from "./verification-tokens";
+import { consumeFound, findToken, issueAndMail, spendToken } from "./verification-tokens";
 import { checkPassword } from "./password";
 
 /**
@@ -33,9 +33,12 @@ export async function requestPasswordReset(email: string) {
   // out is answered by the restore screen instead. Both are silent here.
   if (!user || !user.passwordHash || user.deletionRequestedAt) return;
 
-  const token = await issueToken({ purpose: "reset_password", identifier: email, userId: user.id });
-  const mail = resetPasswordTemplate(user.name, token);
-  await sendMail({ to: email, ...mail }).catch(() => undefined);
+  await issueAndMail({
+    purpose: "reset_password",
+    identifier: email,
+    userId: user.id,
+    send: token => sendMail({ to: email, ...resetPasswordTemplate(user.name, token) })
+  });
 }
 
 export type ResetOutcome =
@@ -114,9 +117,19 @@ export async function requestEmailChange(user: { id: string; name: string }, new
     return { ok: false as const, message: "تغيير البريد مش متاح دلوقتي. جرّب بعدين." };
   }
 
-  const token = await issueToken({ purpose: "change_email", identifier: newEmail, userId: user.id });
-  const mail = changeEmailTemplate(user.name, newEmail, token);
-  await sendMail({ to: newEmail, ...mail }).catch(() => undefined);
+  const result = await issueAndMail({
+    purpose: "change_email",
+    identifier: newEmail,
+    userId: user.id,
+    send: token => sendMail({ to: newEmail, ...changeEmailTemplate(user.name, newEmail, token) })
+  });
+
+  // Unlike a password reset, this one may say so: the address was typed by the
+  // person asking, so reporting that it could not be reached tells them
+  // something about their own account and nothing about anyone else's.
+  if (!result.sent) {
+    return { ok: false as const, message: "مقدرناش نبعت للبريد ده. اتأكد إنه مظبوط وجرّب تاني." };
+  }
   return { ok: true as const };
 }
 

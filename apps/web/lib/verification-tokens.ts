@@ -92,6 +92,44 @@ export async function consumeFound(
   return count === 1;
 }
 
+/**
+ * Issues a token, mails it, and takes it back if the mail did not go.
+ *
+ * Without this a refused send — an unverified sending domain, a provider
+ * outage — still leaves a live row behind: a working link that nobody was
+ * given, sitting in the table until it expires. Not dangerous, since holding
+ * the row is not holding the token, but it makes the table lie about what is
+ * outstanding.
+ *
+ * The caller still learns nothing about whether the address exists; that
+ * decision belongs upstream, and this only reports whether the send worked.
+ */
+export async function issueAndMail({
+  purpose,
+  identifier,
+  userId,
+  send
+}: {
+  purpose: Purpose;
+  identifier: string;
+  userId?: string;
+  send: (token: string) => Promise<{ sent: boolean; reason?: string }>;
+}) {
+  const token = await issueToken({ purpose, identifier, userId });
+  const result = await send(token).catch(() => ({ sent: false, reason: "threw" }));
+
+  if (!result.sent) {
+    await prisma.verificationToken
+      .deleteMany({ where: { tokenHash: hash(token) } })
+      .catch(() => undefined);
+    // Named loudly, because the caller's answer to the person is deliberately
+    // the same either way and this log is the only place the failure shows.
+    console.error(`Mail for ${purpose} was not delivered (${result.reason ?? "unknown"}); token discarded.`);
+  }
+
+  return result;
+}
+
 export type SpentToken =
   | { ok: true; identifier: string; userId: string | null }
   | { ok: false; reason: "invalid" | "expired" };

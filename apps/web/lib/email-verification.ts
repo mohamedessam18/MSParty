@@ -1,7 +1,7 @@
 import { prisma } from "./prisma";
 import { mailConfigured, sendMail } from "./mail";
 import { verifyEmailTemplate } from "./mail-templates";
-import { issueToken, spendToken } from "./verification-tokens";
+import { issueAndMail, spendToken } from "./verification-tokens";
 
 // The token machinery is shared with password resets and address changes —
 // see lib/verification-tokens.ts. Re-exported so the nightly job keeps its
@@ -18,9 +18,11 @@ export async function sendVerificationEmail(user: { name: string; email: string 
   if (!mailConfigured()) return { sent: false as const };
 
   const identifier = user.email.toLowerCase();
-  const token = await issueToken({ purpose: "verify_email", identifier });
-  const mail = verifyEmailTemplate(user.name, token);
-  return sendMail({ to: identifier, ...mail });
+  return issueAndMail({
+    purpose: "verify_email",
+    identifier,
+    send: token => sendMail({ to: identifier, ...verifyEmailTemplate(user.name, token) })
+  });
 }
 
 /** Spends a link and marks the address proven. */
