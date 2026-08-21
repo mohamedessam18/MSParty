@@ -54,7 +54,6 @@ export async function sendMail({
   }
 }
 
-/** Where links in mail point. */
-export function siteUrl() {
-  return (process.env.NEXTAUTH_URL || "http://localhost:3000").replace(/\/$/, "");
-}
+/** Where links in mail point. Shared with the auth callbacks, which need the
+ *  same absolute origin for the same reason — see lib/site-url.ts. */
+export { siteUrl } from "./site-url";

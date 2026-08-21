@@ -6,6 +6,7 @@ import { prisma } from "./prisma";
 import { rateLimit, releaseAttempt } from "./rate-limit";
 import { resolveGoogleUser } from "./google-account";
 import { issueRestoreTicket } from "./restore-ticket";
+import { siteUrl } from "./site-url";
 
 /**
  * Google is only offered when it is actually configured. An empty client id
@@ -141,7 +142,7 @@ export const authOptions: NextAuthOptions = {
 
       if (account?.provider === "google") {
         const resolved = await resolveGoogleUser(account, profile);
-        if (!resolved.ok) return `/login?error=google_${resolved.reason}`;
+        if (!resolved.ok) return `${siteUrl()}/login?error=google_${resolved.reason}`;
         userId = resolved.userId;
       }
 
@@ -155,8 +156,14 @@ export const authOptions: NextAuthOptions = {
       // opened for it. Returning a URL sends them to the one screen that account
       // is still allowed to reach — the offer to bring it back — carrying a
       // signed, short-lived ticket that says the sign-in itself succeeded.
+      //
+      // Absolute, and it has to be: next-auth's own client runs
+      // `new URL(data.url)` on whatever this returns, with no base to resolve
+      // against, so a path throws there and the refusal surfaces to the person
+      // as "could not sign in" instead of as the offer to come back.
       if (record.deletionRequestedAt) {
-        return `/account/restore?t=${encodeURIComponent(await issueRestoreTicket(userId))}`;
+        const ticket = encodeURIComponent(await issueRestoreTicket(userId));
+        return `${siteUrl()}/account/restore?t=${ticket}`;
       }
 
       return true;
