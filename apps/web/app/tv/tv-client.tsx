@@ -12,6 +12,8 @@ type Status =
   | { kind: "starting" }
   | { kind: "waiting"; code: string }
   | { kind: "idle"; code: string; owner: string }
+  /** The owner asked to be deleted. Still paired, waiting to see if they return. */
+  | { kind: "suspended"; owner: string }
   | { kind: "ready"; token: string; party: TvParty }
   | { kind: "error"; message: string };
 
@@ -78,6 +80,9 @@ export function TvClient() {
 
         if (data.status === "ready") setStatus({ kind: "ready", token: data.token, party: data.party });
         else if (data.status === "idle") setStatus({ kind: "idle", code: data.code, owner: data.owner });
+        // Deliberately keeps polling and keeps the stored secret: the account may
+        // come back inside its grace period, and the set should simply resume.
+        else if (data.status === "suspended") setStatus({ kind: "suspended", owner: data.owner });
         else setStatus({ kind: "waiting", code: data.code });
       } catch {
         // A television's network drops constantly — the set moves rooms, the
@@ -118,6 +123,16 @@ export function TvClient() {
         title={`أهلاً ${status.owner} 👋`}
         body="التليفزيون مربوط بحسابك. افتح سهرة من الموبايل واختار «شغّلها على التليفزيون» وهتظهر هنا على طول."
         action={`كود الجهاز: ${status.code}`}
+      />
+    );
+  }
+
+  if (status.kind === "suspended") {
+    return (
+      <TvNotice
+        title="الحساب ده متجدول للحذف"
+        body={`حساب ${status.owner} طلب الحذف، فالتليفزيون واقف مؤقتًا. لو رجّع حسابه، السهرة هترجع هنا لوحدها من غير ما تعمل حاجة.`}
+        action="سيب الصفحة مفتوحة"
       />
     );
   }

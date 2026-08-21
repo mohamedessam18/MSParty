@@ -49,9 +49,13 @@ export async function GET(request: Request) {
     return NextResponse.json({ status: "waiting", code: device.code });
   }
 
-  // The account left. The set is a credential for it, so it goes quiet too.
+  // The owner is on their way out. The set goes quiet — it is a credential for
+  // an account that is meant to be gone — but it must not be told the credential
+  // is *dead*: a 404 makes the television throw its secret away and ask for a
+  // new code, so an account brought back inside its grace period would come back
+  // to an unpaired set and an orphaned row. Suspended, not unknown.
   if (device.user.deletionRequestedAt) {
-    return NextResponse.json({ status: "unknown" }, { status: 404 });
+    return NextResponse.json({ status: "suspended", code: device.code, owner: device.user.name });
   }
 
   await touchDevice(device.id).catch(() => undefined);
