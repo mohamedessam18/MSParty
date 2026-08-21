@@ -48,6 +48,34 @@ export function verifyEmailTemplate(name: string, token: string) {
   };
 }
 
+export function resetPasswordTemplate(name: string, token: string) {
+  const href = `${siteUrl()}/reset?token=${encodeURIComponent(token)}`;
+  return {
+    subject: "استرجاع كلمة المرور في MSParty",
+    html: layout(
+      "نسيت كلمة المرور؟",
+      `<p style="margin:0">أهلاً ${escapeHtml(name)}، اضغط الزرار ده وتحط كلمة مرور جديدة.</p>
+       ${button(href, "اختار كلمة مرور جديدة")}
+       <p style="margin:0;font-size:13px;color:${DIM}">الرابط بيقف بعد ساعة، وبيشتغل مرة واحدة بس.</p>
+       <p style="margin:14px 0 0;font-size:13px;color:${DIM}">لما تغيّرها، أي جهاز داخل بحسابك هيتسجّل خروجه تلقائيًا.</p>`
+    )
+  };
+}
+
+export function changeEmailTemplate(name: string, newEmail: string, token: string) {
+  const href = `${siteUrl()}/api/user/email/confirm?token=${encodeURIComponent(token)}`;
+  return {
+    subject: "أكّد بريدك الجديد في MSParty",
+    html: layout(
+      "بريد جديد للحساب",
+      `<p style="margin:0">أهلاً ${escapeHtml(name)}، إنت طلبت تخلي بريد حسابك هو
+       <b>${escapeHtml(newEmail)}</b>. أكّد إنه بتاعك عشان التغيير يتم.</p>
+       ${button(href, "أكّد البريد الجديد")}
+       <p style="margin:0;font-size:13px;color:${DIM}">لحد ما تضغط، حسابك لسه على بريده القديم.</p>`
+    )
+  };
+}
+
 export function deletionScheduledTemplate(name: string, daysLeft: number, erasesAt: Date) {
   const href = `${siteUrl()}/login`;
   return {

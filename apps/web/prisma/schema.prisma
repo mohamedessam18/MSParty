@@ -26,6 +26,10 @@ model User {
   // check-then-insert — is what stops two people claiming the same shape.
   usernameCanonical String? @unique
   usernameChangedAt DateTime?
+  // Bumped to end every session that exists. A JWT cannot be recalled once it
+  // is issued, so the only way to make "sign out everywhere" mean anything is
+  // to record a number the token has to still match — see lib/auth.ts.
+  tokenVersion Int @default(0)
   // Appear offline to friends without leaving the network.
   invisible Boolean @default(false)
   // When erasure was asked for. The account is hidden from that moment and
@@ -44,6 +48,7 @@ model User {
   createdAt DateTime @default(now())
   accounts Account[]
   tvDevices TvDevice[]
+  verificationTokens VerificationToken[]
   hostedParties Party[] @relation("HostedParties")
   memberships PartyMember[]
   messages ChatMessage[]
@@ -132,11 +137,15 @@ model TvDevice {
 model VerificationToken {
   id String @id @default(cuid())
   // What is being proven — the email address, lowercased.
+  // What is being proven. The address for verify_email and reset_password, and
+  // the *new* address for change_email — which is why userId exists: at that
+  // point the address does not identify anyone yet.
   identifier String
   tokenHash String @unique
-  // verify_email is the only purpose today; the column keeps the table from
-  // being copied wholesale the first time there is a second one.
+  // verify_email | reset_password | change_email
   purpose String @default("verify_email")
+  userId String?
+  user User? @relation(fields: [userId], references: [id], onDelete: Cascade)
   expiresAt DateTime
   createdAt DateTime @default(now())
 

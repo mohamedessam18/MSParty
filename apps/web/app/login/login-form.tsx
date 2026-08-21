@@ -25,6 +25,8 @@ const NOTICES: Record<string, { tone: "good" | "bad"; text: string }> = {
   "verify=expired": { tone: "bad", text: "رابط التأكيد انتهت مدته. هنبعتلك واحد جديد من الإعدادات." },
   "verify=invalid": { tone: "bad", text: "رابط التأكيد مش مظبوط أو اتستخدم قبل كده." },
   "verify=throttled": { tone: "bad", text: "محاولات كتير. استنى شوية وجرّب تاني." },
+  revoked: { tone: "good", text: "قفلنا كل الجلسات. ادخل تاني من الجهاز ده." },
+  "email=changed": { tone: "good", text: "بريد حسابك اتغيّر. ادخل بالبريد الجديد." },
   restore_expired: { tone: "bad", text: "الرابط ده انتهت مدته. سجّل الدخول تاني وهنسألك من الأول." },
   restore_erased: { tone: "bad", text: "الحساب ده اتمسح خلاص، ومش هينفع يرجع. تقدر تعمل حساب جديد." },
   google_unverified: { tone: "bad", text: "جوجل مأكدتش البريد ده، فمش هنقدر نربطه بحساب هنا." },
@@ -58,7 +60,9 @@ function Login({ googleEnabled }: { googleEnabled: boolean }) {
     NOTICES[params.get("error") || ""] ||
     (verify ? NOTICES[`verify=${verify}`] : undefined) ||
     (params.get("registered") ? NOTICES.registered : undefined) ||
-    (params.get("restored") ? NOTICES.restored : undefined);
+    (params.get("restored") ? NOTICES.restored : undefined) ||
+    (params.get("revoked") ? NOTICES.revoked : undefined) ||
+    (params.get("email") ? NOTICES[`email=${params.get("email")}`] : undefined);
 
   async function submit(event: React.FormEvent) {
     event.preventDefault();
@@ -163,6 +167,11 @@ function Login({ googleEnabled }: { googleEnabled: boolean }) {
           <Button size="lg" disabled={loading} className="w-full">
             {loading ? "جارٍ تسجيل الدخول..." : "ادخل للبارتيهات"}
           </Button>
+          <p className="text-center">
+            <Link className="text-sm text-ivory-dim hover:text-gold hover:underline" href="/forgot">
+              نسيت كلمة المرور؟
+            </Link>
+          </p>
         </form>
       </div>
     </AuthShell>

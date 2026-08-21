@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
-import { requireUser } from "@/lib/current-user";
+import { requireDbUser } from "@/lib/current-user";
 import { deleteR2Object, storageKeyFrom } from "@/lib/r2";
 import { claimUsername } from "@/lib/username-claim";
 import { authError } from "@/lib/api-errors";
@@ -12,7 +12,9 @@ const SELECT = { id: true, name: true, email: true, avatarUrl: true, isGuest: tr
 
 export async function GET() {
   try {
-    const { id } = await requireUser();
+    // requireDbUser, not requireUser: it is what enforces a revoked session and
+    // a departing account, and it loads the row this route needs anyway.
+    const { id } = await requireDbUser();
     const user = await prisma.user.findUnique({ where: { id }, select: SELECT });
     if (!user) return NextResponse.json({ message: "User not found" }, { status: 404 });
     return NextResponse.json(user);
@@ -23,7 +25,7 @@ export async function GET() {
 
 export async function PATCH(request: Request) {
   try {
-    const { id } = await requireUser();
+    const { id } = await requireDbUser();
     const { name, avatarUrl, username } = await request.json();
 
     const data: { name?: string; avatarUrl?: string | null } = {};

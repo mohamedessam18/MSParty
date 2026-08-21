@@ -12,6 +12,7 @@ import { PushToggle } from "@/components/push-toggle";
 import { UsernameField } from "@/components/username-field";
 import { FriendsPanel } from "./friends-panel";
 import { DeleteAccount } from "./delete-account";
+import { AccountSecurity } from "./account-security";
 
 export type Profile = {
   id: string;
@@ -173,6 +174,8 @@ export function ProfileClient({ initial, stats }: { initial: Profile; stats: { p
           </Button>
         </form>
       </Card>
+
+      <AccountSecurity email={me.email} isGuest={me.isGuest} />
 
       <Card className="mt-6 p-5">
         <Kicker>التليفزيون</Kicker>

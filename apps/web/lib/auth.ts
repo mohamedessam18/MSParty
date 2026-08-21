@@ -20,6 +20,8 @@ const LOGIN_ATTEMPTS = 10;
 const LOGIN_WINDOW_SECONDS = 15 * 60;
 const GUEST_ACCOUNTS = 5;
 const GUEST_WINDOW_SECONDS = 60 * 60;
+/** How long a session may run before it has to prove it was not revoked. */
+const REVALIDATE_SECONDS = 5 * 60;
 
 /**
  * The address of whoever is signing in.
@@ -168,6 +170,21 @@ export const authOptions: NextAuthOptions = {
 
       return true;
     },
+    /**
+     * Sessions here are JWTs, which cannot be recalled once handed out — so
+     * "sign out everywhere" can only work by giving the token something to keep
+     * matching. The account carries a version; the token carries the value it
+     * was issued with; bumping the account's ends every token in existence.
+     *
+     * The check here runs on a timer, because this callback fires on every
+     * session lookup and a query per lookup would put a round trip in front of
+     * every page. That would leave a revoked session usable for the length of
+     * the timer — so it is not what actually enforces revocation. requireDbUser
+     * compares the same two numbers on every API request, using the row it was
+     * already loading, which costs nothing and takes effect immediately. This
+     * is the slower half: it eventually empties the cookie itself, so a revoked
+     * browser stops looking signed in rather than merely failing at everything.
+     */
     async jwt({ token, user, account }) {
       if (account?.provider === "google") {
         // The id from Google is Google's, not ours. The link row written during
@@ -186,18 +203,39 @@ export const authOptions: NextAuthOptions = {
         token.sub = linked.userId;
         token.name = linked.user.name;
         token.picture = linked.user.avatarUrl;
-        return token;
-      }
+        // Falls through to the revocation stamp below rather than returning,
+        // so a Google session is as revocable as a password one.
 
-      if (user) {
+      } else if (user) {
         token.sub = user.id;
         token.picture = user.image;
       }
+
+      if (token.sub) {
+        const checkedAt = typeof token.checkedAt === "number" ? token.checkedAt : 0;
+        const stale = Date.now() - checkedAt > REVALIDATE_SECONDS * 1000;
+        if (user || stale) {
+          const record = await prisma.user.findUnique({
+            where: { id: token.sub },
+            select: { tokenVersion: true }
+          });
+          // The account is gone, or every session of it was ended. An empty
+          // token has no sub, which the session callback reads as signed out.
+          if (!record) return {};
+          if (typeof token.version === "number" && token.version !== record.tokenVersion) return {};
+          token.version = record.tokenVersion;
+          token.checkedAt = Date.now();
+        }
+      }
+
       return token;
     },
     async session({ session, token }) {
       if (session.user && token.sub) {
         (session.user as any).id = token.sub;
+        // Carried through so the guards can compare it against the account
+        // without a query of their own — see requireDbUser in current-user.ts.
+        (session.user as any).tokenVersion = token.version;
         session.user.image = token.picture as string | null;
       }
       return session;

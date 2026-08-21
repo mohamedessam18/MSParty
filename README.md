@@ -47,6 +47,25 @@ Only YouTube parties and uploaded videos play there. Platform parties are driven
 
 `browserslist` in `apps/web/package.json` exists for these: webOS and Tizen ship Chromium several years behind desktop, and the default build target compiles syntax they cannot parse.
 
+## Getting back in
+
+Three ways an account can be recovered or locked down, all of which needed the
+mail layer to exist first:
+
+- **Forgot the password.** `/forgot` mails a one-hour, single-use link. The
+  response is identical whether or not the address has an account — for an app
+  people leave to get away from someone, a difference here is a lookup service.
+  Setting the new password ends every other session at the same time.
+- **Changing the address.** Nothing moves until the *new* address proves itself
+  by following a link; until then the account keeps the old one. A typo
+  therefore costs nothing, and a borrowed unlocked phone cannot redirect an
+  account in one step.
+- **Sign out everywhere.** Sessions are JWTs and cannot be recalled, so the
+  account carries a `tokenVersion` the token has to keep matching. `requireDbUser`
+  compares the two on every API request out of the row it was already loading —
+  no extra query, and revocation takes effect on the next request rather than
+  whenever a token happens to be rechecked.
+
 ## Deleting an account
 
 Pressing delete hides the account immediately and schedules erasure 30 days out. "Hidden" is enforced, not decorative — it drops out of friend lists, search, the feed, notifications and party rosters, its profile 404s, its socket connection is refused, and its name in old chat lines reads "مستخدم محذوف".
