@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
 import { requireDbUser } from "@/lib/current-user";
 import { notify } from "@/lib/notify";
+import { authError } from "@/lib/api-errors";
 
 export const dynamic = "force-dynamic";
 
@@ -10,8 +11,8 @@ export async function POST(_: Request, { params }: { params: { id: string } }) {
   let user;
   try {
     user = await requireDbUser();
-  } catch {
-    return NextResponse.json({ message: "Unauthorized" }, { status: 401 });
+  } catch (error) {
+    return authError(error);
   }
 
   const row = await prisma.friendship.findUnique({ where: { id: params.id } });
@@ -34,8 +35,8 @@ export async function DELETE(_: Request, { params }: { params: { id: string } })
   let user;
   try {
     user = await requireDbUser();
-  } catch {
-    return NextResponse.json({ message: "Unauthorized" }, { status: 401 });
+  } catch (error) {
+    return authError(error);
   }
 
   const row = await prisma.friendship.findUnique({ where: { id: params.id } });

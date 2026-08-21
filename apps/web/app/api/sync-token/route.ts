@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { requireDbUser } from "@/lib/current-user";
 import { createSyncToken } from "@/lib/sync-token";
+import { authError } from "@/lib/api-errors";
 
 // This response carries a signed identity. Next's default of
 // "Cache-Control: public, max-age=0" is wrong for that, so opt out explicitly
@@ -11,7 +12,7 @@ export async function GET() {
   try {
     const user = await requireDbUser();
     return NextResponse.json({ token: await createSyncToken(user) });
-  } catch {
-    return NextResponse.json({ message: "Unauthorized" }, { status: 401 });
+  } catch (error) {
+    return authError(error);
   }
 }

@@ -25,6 +25,11 @@ import type { ControlRequest, FlyingReaction, Member, Message, QueueItem } from 
 import { parseSubtitles, toVtt } from "@/lib/subtitles";
 import type { StageHandle } from "./room/video-stage";
 
+/** Drift thresholds, in seconds. */
+const HARD_SEEK = 5; // beyond this, catching up gradually would take too long
+const NUDGE = 0.35; // beyond this, lean on playback rate
+const SETTLED = 0.15; // inside this, run at normal speed
+
 type Party = {
   id: string;
   code: string;
@@ -40,10 +45,6 @@ type Party = {
   members: { role: string; user: { id: string; name: string; avatarUrl?: string | null } }[];
 };
 
-/** Drift thresholds, in seconds. */
-const HARD_SEEK = 5; // beyond this, catching up gradually would take too long
-const NUDGE = 0.35; // beyond this, lean on playback rate
-const SETTLED = 0.15; // inside this, run at normal speed
 
 export function PartyRoom({ party, userId }: { party: Party; userId: string }) {
   const router = useRouter();

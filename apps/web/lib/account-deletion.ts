@@ -1,24 +1,14 @@
 import bcrypt from "bcryptjs";
+import { GRACE_DAYS, REMINDER_DAYS_BEFORE, deletionState } from "./account-lifecycle";
 import { prisma } from "./prisma";
 import { abortMultipart, deleteR2Object, storageKeyFrom } from "./r2";
+import { mailConfigured, sendMail } from "./mail";
+import { deletionDoneTemplate, deletionReminderTemplate, deletionScheduledTemplate } from "./mail-templates";
 
-/** How long an account waits before it is erased, and can be taken back. */
-export const GRACE_DAYS = 30;
-
-/** What a message shows once its author is gone. */
-export const ERASED_AUTHOR = "مستخدم محذوف";
-
-export type DeletionState = { requestedAt: Date; erasesAt: Date; daysLeft: number };
-
-export function deletionState(requestedAt: Date | null): DeletionState | null {
-  if (!requestedAt) return null;
-  const erasesAt = new Date(requestedAt.getTime() + GRACE_DAYS * 86400_000);
-  return {
-    requestedAt,
-    erasesAt,
-    daysLeft: Math.max(0, Math.ceil((erasesAt.getTime() - Date.now()) / 86400_000))
-  };
-}
+// Re-exported so callers that already reach for these here keep working, and so
+// there is one obvious place to import them from when erasure is also in play.
+export { ACTIVE_USER, ERASED_AUTHOR, GRACE_DAYS, deletionState, maskDeparted } from "./account-lifecycle";
+export type { DeletionState } from "./account-lifecycle";
 
 /**
  * Confirms the person asking is the person leaving.
@@ -42,19 +32,60 @@ export async function confirmIdentity(
  * Starts the clock. The account goes dark immediately — that matters, because
  * a common reason to leave is wanting to stop being findable by someone, and
  * telling that person to wait a month is not an answer.
+ *
+ * The previous `invisible` value is stored alongside, because forcing the flag
+ * on is only half a change: without remembering what it was, cancelling has
+ * nothing to put back and has to guess.
  */
-export async function scheduleDeletion(userId: string) {
-  return prisma.user.update({
-    where: { id: userId },
-    data: { deletionRequestedAt: new Date(), invisible: true },
+export async function scheduleDeletion(user: { id: string; name: string; email: string | null; invisible: boolean }) {
+  const updated = await prisma.user.update({
+    where: { id: user.id },
+    data: {
+      deletionRequestedAt: new Date(),
+      invisible: true,
+      invisibleBeforeDeletion: user.invisible,
+      // A previous cancelled request may have left one behind; this run gets
+      // its own reminder.
+      deletionReminderSentAt: null
+    },
     select: { deletionRequestedAt: true }
   });
+
+  const state = deletionState(updated.deletionRequestedAt)!;
+  if (user.email) {
+    // Best effort, and after the write. Someone must not be told the deletion
+    // failed because a mail server was busy.
+    const mail = deletionScheduledTemplate(user.name, state.daysLeft, state.erasesAt);
+    await sendMail({ to: user.email, ...mail }).catch(() => undefined);
+  }
+
+  return updated;
 }
 
-/** Takes it back. Invisibility is left on: it was set by us, but turning it off
- *  would override a choice they may have made themselves beforehand. */
-export function cancelDeletion(userId: string) {
-  return prisma.user.update({ where: { id: userId }, data: { deletionRequestedAt: null } });
+/**
+ * Takes it back, and puts back the visibility they had before.
+ *
+ * `invisible` was ours to set, so it is ours to unset — but only to whatever it
+ * was. Someone who was deliberately invisible before they left would otherwise
+ * come back visible to everyone without having asked for that.
+ */
+export async function cancelDeletion(userId: string) {
+  const user = await prisma.user.findUnique({
+    where: { id: userId },
+    select: { invisibleBeforeDeletion: true }
+  });
+
+  return prisma.user.update({
+    where: { id: userId },
+    data: {
+      deletionRequestedAt: null,
+      deletionReminderSentAt: null,
+      // Null means the request predates this column; false is the right guess
+      // there, since forcing it on is what the old code did unconditionally.
+      invisible: user?.invisibleBeforeDeletion ?? false,
+      invisibleBeforeDeletion: null
+    }
+  });
 }
 
 /**
@@ -68,7 +99,10 @@ export function cancelDeletion(userId: string) {
  * must not leave someone's account half-erased and unerasable.
  */
 export async function eraseAccount(userId: string) {
-  const user = await prisma.user.findUnique({ where: { id: userId }, select: { avatarUrl: true } });
+  const user = await prisma.user.findUnique({
+    where: { id: userId },
+    select: { avatarUrl: true, name: true, email: true }
+  });
   if (!user) return false;
 
   const uploads = await prisma.uploadedVideo.findMany({
@@ -100,14 +134,64 @@ export async function eraseAccount(userId: string) {
     // Both are needed: the words are theirs, and the place in the conversation
     // is everyone else's.
     prisma.chatMessage.updateMany({ where: { userId }, data: { message: "" } }),
+    // Keyed by address rather than by user, so nothing survives that could
+    // still verify an address for an account that no longer exists.
+    prisma.verificationToken.deleteMany({ where: { identifier: user.email ?? "" } }),
     // Hosted parties go with them. Uploads attached to those parties are
     // detached rather than destroyed — they may belong to someone else.
     prisma.party.deleteMany({ where: { hostId: userId } }),
     prisma.uploadedVideo.deleteMany({ where: { uploaderId: userId } }),
+    // Linked sign-in methods go with the row by cascade; named here so the
+    // erasure reads as complete rather than relying on the schema to be read.
+    prisma.account.deleteMany({ where: { userId } }),
     prisma.user.delete({ where: { id: userId } })
   ]);
 
+  // Last, and only after the row is gone: a "your account is erased" mail sent
+  // before the erasure would be a lie if the transaction then rolled back.
+  if (user.email) {
+    const mail = deletionDoneTemplate(user.name);
+    await sendMail({ to: user.email, ...mail }).catch(() => undefined);
+  }
+
   return true;
+}
+
+/**
+ * The last-chance mail, a few days out.
+ *
+ * Sent once per request: `deletionReminderSentAt` is what stops the nightly job
+ * mailing the same person every night for the rest of their grace period.
+ * Accounts with no address — guests — are marked as if sent, since there is
+ * nowhere to send to and leaving them unmarked would retry them forever.
+ */
+export async function sendDeletionReminders(limit = 50) {
+  // With no mail provider there is nothing to send and nothing to record.
+  // Marking accounts as reminded anyway would mean that turning mail on later
+  // silently skips everyone already inside their grace period.
+  if (!mailConfigured()) return { sent: 0, considered: 0 };
+
+  const cutoff = new Date(Date.now() - (GRACE_DAYS - REMINDER_DAYS_BEFORE) * 86400_000);
+  const due = await prisma.user.findMany({
+    where: { deletionRequestedAt: { not: null, lte: cutoff }, deletionReminderSentAt: null },
+    select: { id: true, name: true, email: true, deletionRequestedAt: true },
+    take: limit
+  });
+
+  let sent = 0;
+  for (const account of due) {
+    const state = deletionState(account.deletionRequestedAt)!;
+    if (account.email) {
+      const mail = deletionReminderTemplate(account.name, state.daysLeft, state.erasesAt);
+      const result = await sendMail({ to: account.email, ...mail }).catch(() => ({ sent: false }));
+      if (result.sent) sent++;
+    }
+    await prisma.user
+      .update({ where: { id: account.id }, data: { deletionReminderSentAt: new Date() } })
+      .catch(() => undefined);
+  }
+
+  return { sent, considered: due.length };
 }
 
 /** Accounts whose grace period has run out. */

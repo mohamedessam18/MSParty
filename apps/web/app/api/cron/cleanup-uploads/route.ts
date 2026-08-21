@@ -3,7 +3,9 @@ import { prisma } from "@/lib/prisma";
 import { abortMultipart, deleteR2Object } from "@/lib/r2";
 import { pruneHistory } from "@/lib/history";
 import { releaseExpiredHolds } from "@/lib/username-claim";
-import { accountsDueForErasure, eraseAccount } from "@/lib/account-deletion";
+import { accountsDueForErasure, eraseAccount, sendDeletionReminders } from "@/lib/account-deletion";
+import { pruneRateLimits } from "@/lib/rate-limit";
+import { pruneVerificationTokens } from "@/lib/email-verification";
 
 export const dynamic = "force-dynamic";
 
@@ -23,11 +25,19 @@ export async function GET(request: Request) {
   }
 
   // The other things that expire on a clock. Bundled here rather than given
-  // their own schedules: all three are cheap, and one job is one thing to watch.
-  const [history, holds] = await Promise.all([
+  // their own schedules: each is one cheap statement, and one job is one thing
+  // to watch.
+  const [history, holds, limits, tokens] = await Promise.all([
     pruneHistory().catch(() => ({ count: 0 })),
-    releaseExpiredHolds().catch(() => ({ count: 0 }))
+    releaseExpiredHolds().catch(() => ({ count: 0 })),
+    pruneRateLimits().catch(() => ({ count: 0 })),
+    pruneVerificationTokens().catch(() => ({ count: 0 }))
   ]);
+
+  // Before the erasure loop, so an account crossing both lines on the same
+  // night is warned first and erased in a later run rather than being told it
+  // has three days left by a mail that arrives after it is gone.
+  const reminders = await sendDeletionReminders().catch(() => ({ sent: 0 }));
 
   // Accounts whose thirty days are up. One at a time and never in a batch
   // transaction: each one touches storage, and a failure on one must not stop
@@ -41,5 +51,13 @@ export async function GET(request: Request) {
     }
   }
 
-  return NextResponse.json({ deleted: deleted.length, history: history.count, holds: holds.count, erased });
+  return NextResponse.json({
+    deleted: deleted.length,
+    history: history.count,
+    holds: holds.count,
+    limits: limits.count,
+    tokens: tokens.count,
+    reminded: reminders.sent,
+    erased
+  });
 }

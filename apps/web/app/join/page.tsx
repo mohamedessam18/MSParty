@@ -91,6 +91,7 @@ export default function JoinPage() {
         {needsIdentity && (
           <div className="mt-6 border-t border-velvet-hi pt-5">
             <GuestJoin
+              party={code}
               onDone={() => {
                 setNeedsIdentity(false);
                 setLoading(true);

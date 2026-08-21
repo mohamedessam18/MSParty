@@ -1,5 +1,6 @@
 import { prisma } from "./prisma";
 import { areFriends } from "./friends";
+import { ACTIVE_USER } from "./account-lifecycle";
 
 export type Visibility = "private" | "friends" | "code";
 export const VISIBILITIES: Visibility[] = ["private", "friends", "code"];
@@ -59,6 +60,10 @@ export async function discoverableFor(userId: string, friendIds: string[]) {
   if (!friendIds.length) return [];
   return prisma.party.findMany({
     where: {
+      // A room whose host is on their way out is not on offer. Outside the OR
+      // so it holds for an invited room too: the invitation was theirs, and it
+      // leaves with them.
+      host: ACTIVE_USER,
       OR: [
         { hostId: { in: friendIds }, visibility: "friends" },
         { invites: { some: { invitedId: userId, status: "pending" } } }

@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
 import { requireUser } from "@/lib/current-user";
 import { GRACE_DAYS, cancelDeletion, confirmIdentity, deletionState, scheduleDeletion } from "@/lib/account-deletion";
+import { rateLimit, releaseAttempt, tooManyRequests } from "@/lib/rate-limit";
 
 export const dynamic = "force-dynamic";
 
@@ -14,7 +15,15 @@ async function caller() {
   const { id } = await requireUser();
   return prisma.user.findUniqueOrThrow({
     where: { id },
-    select: { id: true, name: true, passwordHash: true, isGuest: true, deletionRequestedAt: true }
+    select: {
+      id: true,
+      name: true,
+      email: true,
+      invisible: true,
+      passwordHash: true,
+      isGuest: true,
+      deletionRequestedAt: true
+    }
   });
 }
 
@@ -47,6 +56,14 @@ export async function POST(request: Request) {
     return NextResponse.json({ deletion: deletionState(user.deletionRequestedAt) });
   }
 
+  // The confirmation is a password prompt, so it can be guessed at like one —
+  // and this is the prompt whose reward is deleting the account. Keyed by user
+  // rather than by address: the attacker here is someone holding an unlocked
+  // phone, and they are on the owner's own network.
+  const attemptKey = `deletion:user:${user.id}`;
+  const limit = await rateLimit(attemptKey, 5, 15 * 60);
+  if (!limit.ok) return tooManyRequests(limit, "محاولات كتير. استنى شوية وجرّب تاني.");
+
   const { confirm } = await request.json().catch(() => ({ confirm: "" }));
   if (!(await confirmIdentity(user, confirm))) {
     return NextResponse.json(
@@ -54,12 +71,17 @@ export async function POST(request: Request) {
       { status: 403 }
     );
   }
+  await releaseAttempt(attemptKey);
 
-  const { deletionRequestedAt } = await scheduleDeletion(user.id);
+  const { deletionRequestedAt } = await scheduleDeletion(user);
   return NextResponse.json({ deletion: deletionState(deletionRequestedAt) });
 }
 
-/** Takes it back, which is what signing back in during the grace period is for. */
+/**
+ * Takes it back, for a session that was already open when the deletion was
+ * scheduled from somewhere else. The signed-out path is /api/account/restore,
+ * which has no session to work from and uses a ticket instead.
+ */
 export async function DELETE() {
   try {
     const user = await caller();

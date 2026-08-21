@@ -3,6 +3,7 @@ import { prisma } from "@/lib/prisma";
 import { requireDbUser } from "@/lib/current-user";
 import { areFriends } from "@/lib/friends";
 import { notify } from "@/lib/notify";
+import { authError } from "@/lib/api-errors";
 
 export const dynamic = "force-dynamic";
 
@@ -11,8 +12,8 @@ export async function GET(_: Request, { params }: { params: { id: string } }) {
   let user;
   try {
     user = await requireDbUser();
-  } catch {
-    return NextResponse.json({ message: "Unauthorized" }, { status: 401 });
+  } catch (error) {
+    return authError(error);
   }
 
   const member = await prisma.partyMember.findUnique({
@@ -32,8 +33,8 @@ export async function POST(request: Request, { params }: { params: { id: string 
   let user;
   try {
     user = await requireDbUser();
-  } catch {
-    return NextResponse.json({ message: "Unauthorized" }, { status: 401 });
+  } catch (error) {
+    return authError(error);
   }
 
   const party = await prisma.party.findUnique({

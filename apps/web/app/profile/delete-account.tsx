@@ -48,8 +48,10 @@ export function DeleteAccount() {
       const data = await response.json().catch(() => ({}));
       if (!response.ok) throw new Error(data.message || "مش قادرين نعمل ده دلوقتي.");
       // Signed out on the way out: the account is hidden from this moment, and
-      // leaving the tab looking signed in would say otherwise.
-      await signOut({ callbackUrl: "/" });
+      // leaving the tab looking signed in would say otherwise. The screen it
+      // lands on is the only place the grace period gets explained to someone
+      // who is actually in it.
+      await signOut({ callbackUrl: "/account/deleted" });
     } catch (cause) {
       setError(cause instanceof Error ? cause.message : "حصلت مشكلة.");
       setBusy(false);
@@ -82,7 +84,7 @@ export function DeleteAccount() {
       <h2 className="display text-lg text-ivory">حذف الحساب</h2>
       <p className="mt-2 text-sm leading-7 text-ivory-dim">
         هتختفي فورًا، وبعد {state.graceDays} يوم يتمسح كل حاجة نهائيًا: سهراتك، فيديوهاتك المرفوعة، صورتك، وأصدقاؤك.
-        لو دخلت تاني خلال المدة دي، حسابك بيرجع زي ما هو.
+        لو سجّلت الدخول تاني خلال المدة دي، هنسألك لو عايز ترجّع الحساب.
       </p>
       <Button variant="danger" className="mt-4" onClick={() => setOpen(true)}>
         احذف حسابي

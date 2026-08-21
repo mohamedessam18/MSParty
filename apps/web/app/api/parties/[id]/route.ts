@@ -1,26 +1,37 @@
 import { NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
 import { requireDbUser, requireMembership } from "@/lib/current-user";
+import { authError } from "@/lib/api-errors";
+import { maskDeparted } from "@/lib/account-lifecycle";
 
 export async function GET(_: Request, { params }: { params: { id: string } }) {
   try {
     await requireMembership(params.id);
   } catch (error) {
-    const forbidden = error instanceof Error && error.message === "FORBIDDEN";
-    return NextResponse.json(
-      { message: forbidden ? "Forbidden" : "Unauthorized" },
-      { status: forbidden ? 403 : 401 }
-    );
+    return authError(error);
   }
 
   const party = await prisma.party.findUnique({
     where: { id: params.id },
     include: {
-      host: { select: { name: true } },
-      members: { include: { user: { select: { id: true, name: true, avatarUrl: true } } } }
+      host: { select: { name: true, deletionRequestedAt: true } },
+      members: {
+        include: { user: { select: { id: true, name: true, avatarUrl: true, deletionRequestedAt: true } } }
+      }
     }
   });
-  return party ? NextResponse.json(party) : NextResponse.json({ message: "Not found" }, { status: 404 });
+  if (!party) return NextResponse.json({ message: "Not found" }, { status: 404 });
+
+  // A member on their way out keeps their seat — the membership has to survive
+  // for restoring to mean anything — but not their name on it.
+  return NextResponse.json({
+    ...party,
+    host: { name: maskDeparted(party.host, Boolean(party.host.deletionRequestedAt)).name },
+    members: party.members.map(member => {
+      const { deletionRequestedAt, ...user } = member.user;
+      return { ...member, user: maskDeparted(user, Boolean(deletionRequestedAt)) };
+    })
+  });
 }
 
 export async function DELETE(_: Request, { params }: { params: { id: string } }) {
@@ -37,7 +48,7 @@ export async function DELETE(_: Request, { params }: { params: { id: string } })
       prisma.party.delete({ where: { id: params.id } })
     ]);
     return new NextResponse(null, { status: 204 });
-  } catch {
-    return NextResponse.json({ message: "Unauthorized" }, { status: 401 });
+  } catch (error) {
+    return authError(error);
   }
 }

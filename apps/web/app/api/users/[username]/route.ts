@@ -2,6 +2,8 @@ import { NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
 import { requireDbUser } from "@/lib/current-user";
 import { areFriends, normalizeUsername, sharedPartyCount } from "@/lib/friends";
+import { ACTIVE_USER } from "@/lib/account-lifecycle";
+import { authError } from "@/lib/api-errors";
 
 export const dynamic = "force-dynamic";
 
@@ -10,12 +12,12 @@ export async function GET(_: Request, { params }: { params: { username: string }
   let viewer;
   try {
     viewer = await requireDbUser();
-  } catch {
-    return NextResponse.json({ message: "Unauthorized" }, { status: 401 });
+  } catch (error) {
+    return authError(error);
   }
 
-  const target = await prisma.user.findUnique({
-    where: { username: normalizeUsername(params.username) },
+  const target = await prisma.user.findFirst({
+    where: { username: normalizeUsername(params.username), ...ACTIVE_USER },
     select: { id: true, name: true, username: true, avatarUrl: true, createdAt: true }
   });
   if (!target) return NextResponse.json({ message: "مفيش حد بالاسم ده." }, { status: 404 });

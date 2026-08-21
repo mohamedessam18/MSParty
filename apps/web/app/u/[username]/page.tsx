@@ -4,6 +4,7 @@ import { getServerSession } from "next-auth";
 import { authOptions } from "@/lib/auth";
 import { prisma } from "@/lib/prisma";
 import { areFriends, normalizeUsername, sharedPartyCount } from "@/lib/friends";
+import { ACTIVE_USER } from "@/lib/account-lifecycle";
 import { Avatar } from "@/components/ui/avatar";
 import { Button } from "@/components/ui/button";
 import { Card, Kicker } from "@/components/ui/card";
@@ -14,8 +15,10 @@ export default async function FriendProfile({ params }: { params: { username: st
   const viewerId = (session?.user as { id?: string } | undefined)?.id;
   if (!viewerId) redirect(`/login?next=/u/${params.username}`);
 
-  const target = await prisma.user.findUnique({
-    where: { username: normalizeUsername(params.username) },
+  // ACTIVE_USER is part of the lookup, so a page for an account in its grace
+  // period is not found rather than found and empty.
+  const target = await prisma.user.findFirst({
+    where: { username: normalizeUsername(params.username), ...ACTIVE_USER },
     select: { id: true, name: true, username: true, avatarUrl: true, createdAt: true }
   });
 

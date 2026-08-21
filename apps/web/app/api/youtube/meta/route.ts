@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { requireUser } from "@/lib/current-user";
 import { fetchYouTubeMeta } from "@/lib/youtube";
+import { authError } from "@/lib/api-errors";
 
 export const dynamic = "force-dynamic";
 
@@ -12,8 +13,8 @@ export const dynamic = "force-dynamic";
 export async function GET(request: Request) {
   try {
     await requireUser();
-  } catch {
-    return NextResponse.json({ message: "Unauthorized" }, { status: 401 });
+  } catch (error) {
+    return authError(error);
   }
 
   const url = new URL(request.url).searchParams.get("url") || "";
