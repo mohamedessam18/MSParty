@@ -5,6 +5,7 @@ import { prisma } from "@/lib/prisma";
 import { requireDbUser } from "@/lib/current-user";
 import { r2Client } from "@/lib/r2";
 import { PART_SIZE, expectedParts } from "@/lib/upload-config";
+import { authError } from "@/lib/api-errors";
 
 export const dynamic = "force-dynamic";
 
@@ -20,8 +21,8 @@ export async function POST(request: Request) {
   let user;
   try {
     user = await requireDbUser();
-  } catch {
-    return NextResponse.json({ message: "Unauthorized" }, { status: 401 });
+  } catch (error) {
+    return authError(error);
   }
 
   try {
@@ -128,7 +129,7 @@ export async function GET() {
       select: { id: true, title: true, duration: true, posterUrl: true, sizeBytes: true, fileUrl: true, partyId: true, uploadedAt: true }
     });
     return NextResponse.json(videos);
-  } catch {
-    return NextResponse.json({ message: "Unauthorized" }, { status: 401 });
+  } catch (error) {
+    return authError(error);
   }
 }

@@ -1,15 +1,27 @@
 "use client";
 import Link from "next/link";
-import { useRouter } from "next/navigation";
-import { useState } from "react";
+import { useRouter, useSearchParams } from "next/navigation";
+import { Suspense, useState } from "react";
+import { AuthShell } from "@/components/auth/auth-shell";
+import { AuthDivider, GoogleButton } from "@/components/auth/google-button";
+import { PasswordMeter } from "@/components/auth/password-meter";
 import { Button } from "@/components/ui/button";
-import { Card, Kicker } from "@/components/ui/card";
 import { Field, FormError, Input } from "@/components/ui/input";
-import { Rule, Wordmark } from "@/components/ui/wordmark";
 import { UsernameField } from "@/components/username-field";
+import { PASSWORD_MIN, checkPassword } from "@/lib/password";
 
-export function RegisterForm() {
+export function RegisterForm({ googleEnabled }: { googleEnabled: boolean }) {
+  return (
+    <Suspense>
+      <Register googleEnabled={googleEnabled} />
+    </Suspense>
+  );
+}
+
+function Register({ googleEnabled }: { googleEnabled: boolean }) {
   const router = useRouter();
+  const params = useSearchParams();
+  const next = params.get("next");
   const [name, setName] = useState("");
   const [username, setUsername] = useState("");
   const [email, setEmail] = useState("");
@@ -23,8 +35,9 @@ export function RegisterForm() {
     setLoading(true);
     const cleanName = name.trim();
     const cleanEmail = email.trim();
-    if (!cleanName || !cleanEmail || password.length < 8) {
-      setError("من فضلك ادخل اسمك، بريد صح، وكلمة مرور من 8 أحرف على الأقل.");
+
+    if (!cleanName || !cleanEmail) {
+      setError("من فضلك ادخل اسمك وبريد صح.");
       setLoading(false);
       return;
     }
@@ -33,54 +46,90 @@ export function RegisterForm() {
       setLoading(false);
       return;
     }
+    // The same check the server runs, so a rejection that was going to happen
+    // anyway happens here — before a round trip, and with the field still in
+    // front of the person who has to change it.
+    const strength = checkPassword(password, { email: cleanEmail, name: cleanName });
+    if (!strength.ok) {
+      setError(strength.message);
+      setLoading(false);
+      return;
+    }
+
     try {
       const response = await fetch("/api/auth/register", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ name: cleanName, email: cleanEmail, password, username })
       });
-      if (!response.ok) {
-        const data = await response.json().catch(() => ({}));
-        throw new Error(data.message || "البريد مستخدم بالفعل أو كلمة المرور غير كافية.");
-      }
-      router.push("/login?registered=1");
-    } catch (err: any) {
-      setError(err.message || "حدث خطأ أثناء إنشاء الحساب.");
+      const data = await response.json().catch(() => ({}));
+      if (!response.ok) throw new Error(data.message || "مقدرناش نعمل الحساب.");
+
+      const query = new URLSearchParams({ registered: "1" });
+      if (data.verificationSent) query.set("verify", "sent");
+      if (next?.startsWith("/") && !next.startsWith("//")) query.set("next", next);
+      router.push(`/login?${query}`);
+    } catch (cause) {
+      setError(cause instanceof Error ? cause.message : "حدث خطأ أثناء إنشاء الحساب.");
       setLoading(false);
     }
   }
 
   return (
-    <main className="mx-auto flex min-h-screen max-w-md flex-col justify-center px-5 py-10">
-      <Wordmark className="mb-8 self-start" />
-      <Card className="p-6 shadow-lift sm:p-8">
-        <Kicker>حساب جديد</Kicker>
-        <h1 className="display mt-2 text-3xl text-ivory">اعمل مكان للسهرة.</h1>
-        <Rule className="mt-4" />
-        <p className="mt-4 text-sm text-ivory-dim">ثلاث خانات، وبعدها تبقى جاهز تدعو صحابك.</p>
-        <form className="mt-6 space-y-4" onSubmit={submit}>
+    <AuthShell
+      kicker="حساب جديد"
+      title="اعمل مكان للسهرة."
+      lede="أربع خانات، وبعدها تبقى جاهز تدعو صحابك."
+      footer={
+        <>
+          عندك حساب؟{" "}
+          <Link className="text-gold hover:underline" href={next ? `/login?next=${encodeURIComponent(next)}` : "/login"}>
+            ادخل من هنا
+          </Link>
+        </>
+      }
+    >
+      <div className="space-y-5">
+        {googleEnabled && (
+          <>
+            <GoogleButton next={next} label="اعمل حساب بجوجل" />
+            <AuthDivider />
+          </>
+        )}
+
+        <form className="space-y-4" onSubmit={submit}>
           <Field label="الاسم">
-            <Input required value={name} onChange={event => setName(event.target.value)} />
+            <Input required autoComplete="name" value={name} onChange={event => setName(event.target.value)} />
           </Field>
           <UsernameField value={username} onChange={setUsername} />
           <Field label="البريد الإلكتروني">
-            <Input required type="email" dir="ltr" value={email} onChange={event => setEmail(event.target.value)} />
+            <Input
+              required
+              type="email"
+              dir="ltr"
+              autoComplete="email"
+              value={email}
+              onChange={event => setEmail(event.target.value)}
+            />
           </Field>
-          <Field label="كلمة المرور" hint="8 أحرف على الأقل">
-            <Input required minLength={8} type="password" dir="ltr" value={password} onChange={event => setPassword(event.target.value)} />
+          <Field label="كلمة المرور" hint={`${PASSWORD_MIN} أحرف على الأقل — الطول أهم من العلامات الغريبة`}>
+            <Input
+              required
+              minLength={PASSWORD_MIN}
+              type="password"
+              dir="ltr"
+              autoComplete="new-password"
+              value={password}
+              onChange={event => setPassword(event.target.value)}
+            />
+            <PasswordMeter value={password} />
           </Field>
           {error && <FormError>{error}</FormError>}
           <Button size="lg" disabled={loading} className="w-full">
             {loading ? "جارٍ إنشاء الحساب..." : "اعمل حساب"}
           </Button>
         </form>
-        <p className="mt-6 text-sm text-ivory-dim">
-          عندك حساب؟{" "}
-          <Link className="text-gold hover:underline" href="/login">
-            ادخل من هنا
-          </Link>
-        </p>
-      </Card>
-    </main>
+      </div>
+    </AuthShell>
   );
 }

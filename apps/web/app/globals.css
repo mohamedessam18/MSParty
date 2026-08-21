@@ -83,6 +83,118 @@
     border: 1px solid rgb(201 162 39 / 0.3);
     background: linear-gradient(180deg, rgb(201 162 39 / 0.08), transparent 45%);
   }
+
+  /* --- Depth, for the screens you arrive on ------------------------------
+     The sign-in screens are the only place with nothing to do but look like
+     something, so they get a stage: a card standing in a lit box rather than a
+     rectangle painted on the page.
+
+     Built entirely from transforms on elements that are already there — no
+     canvas, no library, nothing to download. The tilt itself is applied by
+     TiltStage as a CSS variable, so a device that cannot hover, or a reader who
+     asked for less motion, simply never sets it and the card stands straight. */
+  .stage {
+    perspective: 1400px;
+    perspective-origin: 50% 40%;
+  }
+
+  .stage-card {
+    transform-style: preserve-3d;
+    transform: rotateX(var(--tilt-x, 0deg)) rotateY(var(--tilt-y, 0deg));
+    transition: transform 0.45s cubic-bezier(0.22, 1, 0.36, 1);
+    will-change: transform;
+  }
+
+  /* Layers lifted off the card face. Parallax comes free: the browser moves
+     anything with a positive translateZ further as the card turns. */
+  .depth-1 { transform: translateZ(18px); }
+  .depth-2 { transform: translateZ(34px); }
+  .depth-3 { transform: translateZ(52px); }
+
+  /* The lit edge of a physical object: bright where the light is, dark where
+     the card falls away. Two insets rather than a border, so it reads as a
+     bevel instead of a line. */
+  .bevel {
+    box-shadow:
+      inset 0 1px 0 rgb(232 194 80 / 0.28),
+      inset 0 -1px 0 rgb(0 0 0 / 0.5),
+      0 26px 60px -18px rgb(0 0 0 / 0.85),
+      0 0 0 1px rgb(201 162 39 / 0.16);
+  }
+
+  /* The pool of light the card stands in. Sits behind everything, and is drawn
+     large and blurred so its edge never lands anywhere the eye can find it. */
+  .stage-glow::before {
+    content: "";
+    position: absolute;
+    z-index: -1;
+    inset: -18% -12%;
+    background: radial-gradient(ellipse at 50% 22%, rgb(201 162 39 / 0.16), transparent 62%);
+    filter: blur(14px);
+    pointer-events: none;
+  }
+
+  /* Marquee bulbs across the top of a card. */
+  .bulbs {
+    display: flex;
+    justify-content: center;
+    gap: 10px;
+  }
+  .bulbs span {
+    width: 5px;
+    height: 5px;
+    border-radius: 999px;
+    background: theme(colors.gold.DEFAULT);
+    box-shadow: 0 0 8px rgb(232 194 80 / 0.85);
+    animation: bulb-flicker 2.6s ease-in-out infinite;
+  }
+  .bulbs span:nth-child(2n) { animation-delay: 0.4s; }
+  .bulbs span:nth-child(3n) { animation-delay: 0.9s; }
+
+  @keyframes bulb-flicker {
+    50% { opacity: 0.35; }
+  }
+
+  /* --- Ten feet away ------------------------------------------------------
+     A television is read from across a room and driven with four arrows and an
+     OK button. Neither of those is a smaller phone, so the TV routes opt into
+     their own scale rather than inheriting the app's.
+
+     Sizes are in rem against a root the .tv scope sets, so one number moves the
+     whole screen. The safe inset is for overscan: a good number of sets still
+     crop a few percent off every edge, and anything in that band is simply not
+     on the picture. */
+  .tv {
+    font-size: 24px;
+    /* Rounded off the largest overscan seen in the wild rather than the
+       average: being slightly inside the bezel costs nothing, being outside it
+       loses the text. */
+    --tv-safe: 4vmin;
+  }
+
+  .tv-safe {
+    padding: var(--tv-safe);
+  }
+
+  /* Focus on a television is not a hint, it is the cursor — it has to be
+     findable from the sofa, so it is a filled state and not an outline. */
+  .tv :focus-visible,
+  .tv [data-focused="true"] {
+    outline: none;
+    background: theme(colors.gold.DEFAULT);
+    color: theme(colors.ink.DEFAULT);
+    box-shadow: 0 0 0 6px rgb(201 162 39 / 0.28);
+  }
+
+  /* The pairing code: the one thing on screen that gets read out loud. */
+  .tv-code {
+    font-family: theme(fontFamily.mono);
+    font-size: clamp(3rem, 12vw, 9rem);
+    letter-spacing: 0.16em;
+    line-height: 1;
+    color: theme(colors.gold.lit);
+    text-shadow: 0 0 40px rgb(232 194 80 / 0.35);
+  }
 }
 
 @media (prefers-reduced-motion: reduce) {
@@ -96,5 +208,9 @@
   }
   .grain::after {
     display: none;
+  }
+  /* Set from script, so the global transition override above does not reach it. */
+  .stage-card {
+    transform: none !important;
   }
 }

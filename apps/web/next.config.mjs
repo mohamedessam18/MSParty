@@ -33,6 +33,16 @@ const nextConfig = {
           // it to whatever the page links out to.
           { key: "Referrer-Policy", value: "no-referrer" }
         ]
+      },
+      {
+        // The television screen shows a pairing code, and a code on screen is
+        // an offer to hand an account over. Framed inside someone else's page
+        // it becomes an offer to hand it to them, so nothing may frame it.
+        source: "/tv/:path*",
+        headers: [
+          { key: "Content-Security-Policy", value: "frame-ancestors 'none';" },
+          { key: "Referrer-Policy", value: "no-referrer" }
+        ]
       }
     ];
   }

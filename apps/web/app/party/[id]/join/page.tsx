@@ -50,7 +50,7 @@ export default function JoinParty({ params }: { params: { id: string } }) {
             <p className="mt-2 text-sm leading-7 text-ivory-dim">{error}</p>
 
             <div className="mt-6 border-t border-velvet-hi pt-5">
-              <GuestJoin onDone={() => window.location.reload()} />
+              <GuestJoin party={params.id} onDone={() => window.location.reload()} />
             </div>
 
             <div className="mt-5 flex justify-center gap-2 border-t border-velvet-hi pt-5">

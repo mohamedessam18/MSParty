@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
 import { requireUser } from "@/lib/current-user";
 import { recordWatch } from "@/lib/history";
+import { authError } from "@/lib/api-errors";
 
 export const dynamic = "force-dynamic";
 
@@ -10,8 +11,8 @@ export async function GET(request: Request) {
   let user;
   try {
     user = await requireUser();
-  } catch {
-    return NextResponse.json({ message: "Unauthorized" }, { status: 401 });
+  } catch (error) {
+    return authError(error);
   }
 
   const take = Math.min(Number(new URL(request.url).searchParams.get("take")) || 60, 100);
@@ -52,8 +53,8 @@ export async function POST(request: Request) {
   let user;
   try {
     user = await requireUser();
-  } catch {
-    return NextResponse.json({ message: "Unauthorized" }, { status: 401 });
+  } catch (error) {
+    return authError(error);
   }
 
   const body = await request.json().catch(() => null);

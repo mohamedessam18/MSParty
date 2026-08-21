@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
 import { requireUser } from "@/lib/current-user";
+import { authError } from "@/lib/api-errors";
 
 export const dynamic = "force-dynamic";
 
@@ -10,8 +11,8 @@ export async function DELETE(_: Request, { params }: { params: { id: string } })
   let user;
   try {
     user = await requireUser();
-  } catch {
-    return NextResponse.json({ message: "Unauthorized" }, { status: 401 });
+  } catch (error) {
+    return authError(error);
   }
 
   // deleteMany scoped by userId rather than delete by id: it cannot be made to

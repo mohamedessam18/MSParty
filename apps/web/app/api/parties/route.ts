@@ -9,6 +9,7 @@ import { notifyFriendsLive } from "@/lib/notify";
 import { fetchYouTubeMeta } from "@/lib/youtube";
 import { parsePlatformLink } from "@/lib/platforms";
 import { recordWatch } from "@/lib/history";
+import { authError } from "@/lib/api-errors";
 
 export async function GET() {
   try {
@@ -19,8 +20,8 @@ export async function GET() {
       include: { host: { select: { name: true } }, _count: { select: { members: true } } }
     });
     return NextResponse.json(parties);
-  } catch {
-    return NextResponse.json({ message: "Unauthorized" }, { status: 401 });
+  } catch (error) {
+    return authError(error);
   }
 }
 
@@ -28,8 +29,8 @@ export async function POST(request: Request) {
   let user;
   try {
     user = await requireDbUser();
-  } catch {
-    return NextResponse.json({ message: "Unauthorized" }, { status: 401 });
+  } catch (error) {
+    return authError(error);
   }
 
   // Guests can watch and chat, but a party outlives the browser that made it.

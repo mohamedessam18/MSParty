@@ -7,6 +7,14 @@
     "start": "next start",
     "lint": "next lint"
   },
+  "//browserslist": "Smart TVs are the floor here, not phones: webOS 6 is Chromium 79 and Tizen a similar vintage, and the default target compiles syntax neither of them parses. Raising it costs a few kilobytes on every other browser and is the difference between the TV routes running and a blank screen.",
+  "browserslist": [
+    "chrome >= 79",
+    "edge >= 79",
+    "firefox >= 78",
+    "safari >= 13.1",
+    "not dead"
+  ],
   "dependencies": {
     "@aws-sdk/client-s3": "^3.637.0",
     "@aws-sdk/s3-request-presigner": "^3.637.0",

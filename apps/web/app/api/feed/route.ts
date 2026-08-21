@@ -3,6 +3,8 @@ import { prisma } from "@/lib/prisma";
 import { requireDbUser } from "@/lib/current-user";
 import { friendIdsOf } from "@/lib/friends";
 import { discoverableFor } from "@/lib/party-access";
+import { ACTIVE_USER } from "@/lib/account-lifecycle";
+import { authError } from "@/lib/api-errors";
 
 export const dynamic = "force-dynamic";
 
@@ -16,8 +18,8 @@ export async function GET() {
   let user;
   try {
     user = await requireDbUser();
-  } catch {
-    return NextResponse.json({ message: "Unauthorized" }, { status: 401 });
+  } catch (error) {
+    return authError(error);
   }
 
   const friendIds = await friendIdsOf(user.id);
@@ -25,7 +27,9 @@ export async function GET() {
   const [open, invites, friends, mine] = await Promise.all([
     discoverableFor(user.id, friendIds),
     prisma.partyInvite.findMany({
-      where: { invitedId: user.id, status: "pending" },
+      // An invitation from someone who has since left is not an invitation any
+      // more; it disappears with them and comes back if they do.
+      where: { invitedId: user.id, status: "pending", invitedBy: ACTIVE_USER },
       orderBy: { createdAt: "desc" },
       include: {
         party: { select: { id: true, name: true, isPlaying: true, _count: { select: { members: true } } } },
@@ -33,7 +37,7 @@ export async function GET() {
       }
     }),
     prisma.user.findMany({
-      where: { id: { in: friendIds } },
+      where: { id: { in: friendIds }, ...ACTIVE_USER },
       select: { id: true, name: true, username: true, avatarUrl: true }
     }),
     prisma.party.findMany({

@@ -3,6 +3,7 @@ import { prisma } from "@/lib/prisma";
 import { requireUser } from "@/lib/current-user";
 import { deleteR2Object, storageKeyFrom } from "@/lib/r2";
 import { claimUsername } from "@/lib/username-claim";
+import { authError } from "@/lib/api-errors";
 
 // Per-user response; never let it sit in a shared cache.
 export const dynamic = "force-dynamic";
@@ -15,8 +16,8 @@ export async function GET() {
     const user = await prisma.user.findUnique({ where: { id }, select: SELECT });
     if (!user) return NextResponse.json({ message: "User not found" }, { status: 404 });
     return NextResponse.json(user);
-  } catch {
-    return NextResponse.json({ message: "Unauthorized" }, { status: 401 });
+  } catch (error) {
+    return authError(error);
   }
 }
 

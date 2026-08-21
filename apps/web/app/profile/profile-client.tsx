@@ -175,6 +175,19 @@ export function ProfileClient({ initial, stats }: { initial: Profile; stats: { p
       </Card>
 
       <Card className="mt-6 p-5">
+        <Kicker>التليفزيون</Kicker>
+        <p className="mt-3 text-sm leading-7 text-ivory-dim">
+          افتح <b className="mono text-gold">/tv</b> من متصفح التليفزيون، ووصّله بحسابك مرة واحدة — وبعدين تبعت أي سهرة
+          عليه من هنا.
+        </p>
+        <Link href="/tv/link" className="mt-4 inline-block">
+          <Button variant="ghost" size="sm">
+            📺 وصّل تليفزيون
+          </Button>
+        </Link>
+      </Card>
+
+      <Card className="mt-6 p-5">
         <Kicker>الإشعارات</Kicker>
         <div className="mt-3">
           <PushToggle />

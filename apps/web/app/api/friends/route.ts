@@ -3,6 +3,8 @@ import { prisma } from "@/lib/prisma";
 import { requireDbUser } from "@/lib/current-user";
 import { friendshipBetween, normalizeUsername } from "@/lib/friends";
 import { notify } from "@/lib/notify";
+import { ACTIVE_USER } from "@/lib/account-lifecycle";
+import { authError } from "@/lib/api-errors";
 
 export const dynamic = "force-dynamic";
 
@@ -13,12 +15,19 @@ export async function GET() {
   let user;
   try {
     user = await requireDbUser();
-  } catch {
-    return NextResponse.json({ message: "Unauthorized" }, { status: 401 });
+  } catch (error) {
+    return authError(error);
   }
 
+  // The friendship row survives the departure — it has to, so restoring an
+  // account restores who its friends were — but the other side stops seeing it.
   const rows = await prisma.friendship.findMany({
-    where: { OR: [{ requesterId: user.id }, { addresseeId: user.id }] },
+    where: {
+      OR: [
+        { requesterId: user.id, addressee: ACTIVE_USER },
+        { addresseeId: user.id, requester: ACTIVE_USER }
+      ]
+    },
     include: { requester: { select: PROFILE }, addressee: { select: PROFILE } },
     orderBy: { createdAt: "desc" }
   });
@@ -42,8 +51,8 @@ export async function POST(request: Request) {
   let user;
   try {
     user = await requireDbUser();
-  } catch {
-    return NextResponse.json({ message: "Unauthorized" }, { status: 401 });
+  } catch (error) {
+    return authError(error);
   }
   if (user.isGuest) {
     return NextResponse.json({ message: "لازم تعمل حساب عشان تضيف أصدقاء." }, { status: 403 });
@@ -53,7 +62,9 @@ export async function POST(request: Request) {
   const clean = normalizeUsername(String(username || ""));
   if (!clean) return NextResponse.json({ message: "اكتب اسم المستخدم." }, { status: 400 });
 
-  const target = await prisma.user.findUnique({ where: { username: clean }, select: PROFILE });
+  // findFirst rather than findUnique so the filter can be part of the lookup:
+  // an account on its way out answers exactly like one that never existed.
+  const target = await prisma.user.findFirst({ where: { username: clean, ...ACTIVE_USER }, select: PROFILE });
   if (!target) return NextResponse.json({ message: "مفيش حد بالاسم ده." }, { status: 404 });
   if (target.id === user.id) return NextResponse.json({ message: "ده إنت 🙂" }, { status: 400 });
 

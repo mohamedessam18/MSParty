@@ -12,6 +12,10 @@ model User {
   // Null for guests, who join with a name only and can claim an email later.
   // Postgres permits many NULLs under a unique index, so this stays unique.
   email String? @unique
+  // When the address was proven to be theirs — by a Google sign-in, which only
+  // ever hands over a verified address, or by following a link we mailed. Null
+  // means unproven, not unusable: nothing is gated on it yet.
+  emailVerified DateTime?
   passwordHash String?
   isGuest Boolean @default(false)
   // How people find each other. Null until chosen, and never set for guests —
@@ -25,11 +29,21 @@ model User {
   // Appear offline to friends without leaving the network.
   invisible Boolean @default(false)
   // When erasure was asked for. The account is hidden from that moment and
-  // erased once the grace period is up; signing back in before then cancels it.
+  // erased once the grace period is up; signing in before then is refused and
+  // offers to bring it back instead.
   deletionRequestedAt DateTime?
+  // What `invisible` was before we forced it on. Restoring has to put back the
+  // choice they made themselves, and "false" is not a safe guess: someone who
+  // was deliberately invisible would come back visible without being asked.
+  invisibleBeforeDeletion Boolean?
+  // Stops the "your account is erased in three days" mail going out nightly for
+  // the rest of the grace period.
+  deletionReminderSentAt DateTime?
   name String
   avatarUrl String?
   createdAt DateTime @default(now())
+  accounts Account[]
+  tvDevices TvDevice[]
   hostedParties Party[] @relation("HostedParties")
   memberships PartyMember[]
   messages ChatMessage[]
@@ -47,6 +61,103 @@ model User {
   pushSubscriptions PushSubscription[]
   usernameHolds UsernameHold[]
   watchHistory WatchHistory[]
+}
+
+// A sign-in method that is not a password: one row per provider identity, so an
+// account reached with Google today can gain a password tomorrow without either
+// one displacing the other. Shaped like NextAuth's own table on purpose — the
+// linking is done in lib/auth.ts rather than by an adapter, because an adapter
+// would create accounts without a username and every screen here assumes one.
+model Account {
+  id String @id @default(cuid())
+  userId String
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+  // oauth | oidc
+  type String
+  // google
+  provider String
+  // The provider's own immutable id for the person — "sub" for Google. Never
+  // the email: an address can be reassigned by a workspace admin, a sub cannot.
+  providerAccountId String
+  refresh_token String?
+  access_token String?
+  expires_at Int?
+  token_type String?
+  scope String?
+  id_token String?
+  session_state String?
+  createdAt DateTime @default(now())
+
+  @@unique([provider, providerAccountId])
+  @@index([userId])
+}
+
+// A television that has been handed an account, once.
+//
+// A TV browser is driven by a four-way remote, so signing in on it means typing
+// an address and a password with an on-screen keyboard — the single worst input
+// method in the house. Instead the set shows a code, a phone that is already
+// signed in claims it, and the set keeps the resulting credential.
+//
+// The row is the credential: whoever holds `secret` can ask for a sync token
+// for `user` at any time, which is why it is stored hashed, scoped to one
+// party, and revocable from the phone that created it.
+model TvDevice {
+  id String @id @default(cuid())
+  // Shown on the television, read out loud, typed into a phone. Same alphabet
+  // as a party code — no characters that are confused at six feet.
+  code String @unique
+  // sha256 of the secret the set was handed. Never stored in the clear.
+  secretHash String @unique
+  // Null until a phone claims it. Both are set together.
+  userId String?
+  user User? @relation(fields: [userId], references: [id], onDelete: Cascade)
+  partyId String?
+  party Party? @relation(fields: [partyId], references: [id], onDelete: SetNull)
+  // What the set calls itself, for the "your televisions" list on the phone.
+  label String?
+  claimedAt DateTime?
+  lastSeenAt DateTime?
+  // Minutes while it is an unclaimed code on a screen, months once it is a
+  // television someone owns.
+  expiresAt DateTime
+  createdAt DateTime @default(now())
+
+  @@index([userId])
+  @@index([expiresAt])
+}
+
+// A one-time link mailed to an address to prove it belongs to whoever asked.
+// The token is stored hashed: a leaked database should not hand out live links.
+model VerificationToken {
+  id String @id @default(cuid())
+  // What is being proven — the email address, lowercased.
+  identifier String
+  tokenHash String @unique
+  // verify_email is the only purpose today; the column keeps the table from
+  // being copied wholesale the first time there is a second one.
+  purpose String @default("verify_email")
+  expiresAt DateTime
+  createdAt DateTime @default(now())
+
+  @@index([identifier, purpose])
+  @@index([expiresAt])
+}
+
+// Attempt counters for sign-in, registration and guest creation.
+//
+// In a table rather than in memory because the web app runs as serverless
+// functions: each request may land in a fresh instance, so an in-process
+// counter would reset itself often enough to be no limit at all.
+model RateLimit {
+  // What is being limited, e.g. "login:ip:203.0.113.4" or "login:email:a@b.c".
+  key String @id
+  count Int @default(1)
+  // When the current window ends. Rows are dropped after this by the nightly
+  // job; a row that is merely stale is treated as empty on the next attempt.
+  expiresAt DateTime
+
+  @@index([expiresAt])
 }
 
 // What someone has watched, kept as a snapshot rather than a pointer: a party
@@ -184,6 +295,7 @@ model Party {
   code String @unique
   hostId String
   host User @relation("HostedParties", fields: [hostId], references: [id])
+  tvDevices TvDevice[]
   name String
   // youtube | upload | platform. A platform party is watched on the service's
   // own site through the extension; contentUrl holds the deep link to it.

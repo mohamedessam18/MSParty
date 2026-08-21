@@ -1,6 +1,6 @@
 import { redirect } from "next/navigation";
 import { getServerSession } from "next-auth";
-import { authOptions } from "@/lib/auth";
+import { authOptions, googleEnabled } from "@/lib/auth";
 import { LoginForm } from "./login-form";
 
 /**
@@ -14,5 +14,5 @@ export default async function LoginPage({ searchParams }: { searchParams: { next
     // Same-origin only: a crafted ?next= must not bounce anyone off the site.
     redirect(next?.startsWith("/") && !next.startsWith("//") ? next : "/dashboard");
   }
-  return <LoginForm />;
+  return <LoginForm googleEnabled={googleEnabled} />;
 }
