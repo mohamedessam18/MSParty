@@ -53,6 +53,29 @@ the shared bundle is unchanged and no other page pays for it.
 The sign-in screens get the same room with the furniture left out: the beam,
 the dust and the glow, and nothing to look at behind a password field.
 
+## Finding something, and what happens when it ends
+
+Searching YouTube happens inside the app, so making a party stops meaning
+"leave, find it, copy the link, come back". It is a button rather than a
+search-as-you-type field on purpose: a YouTube project has ten thousand quota
+units a day and each search spends a hundred of them, so a keystroke-triggered
+search would burn the whole app's daily budget — including the link preview,
+which shares the key — while one person typed a film title.
+
+When a video ends, the room moves to the next thing in the queue by itself. The
+end is reported as its own event rather than inferred from a pause at the
+duration: the server does not know how long the video is, so guessing gives
+either a queue that never advances or one that skips a film because somebody
+paused near the end. Only the host's copy reports it, and the server checks
+that again.
+
+A party link unfurls into a card built for that party — its title, its poster,
+how many people are in it. Two things about the renderer are worth knowing
+before editing it: it shapes text itself and cannot handle Arabic without being
+handed a font it can read (see `lib/og-font.ts`), and it ignores `direction`,
+so a string mixing Arabic and Latin comes out reversed unless it is split into
+flex children ordered with `row-reverse`.
+
 ## Televisions
 
 `/tv` is the ten-foot screen: full-bleed video, type sized to be read across a room, and a control surface of exactly one button — OK shows the chat and who is watching, Back hides it.

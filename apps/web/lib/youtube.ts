@@ -118,3 +118,74 @@ export async function fetchYouTubeMeta(rawUrlOrId: string): Promise<YouTubeMeta 
     return fallback;
   }
 }
+
+export type YouTubeResult = {
+  id: string;
+  title: string;
+  channel: string | null;
+  posterUrl: string | null;
+};
+
+/**
+ * Search, which is the expensive call.
+ *
+ * A YouTube API project gets 10,000 quota units a day. A video lookup costs 1;
+ * a *search* costs 100. That is a hundred searches a day for the whole app
+ * before everything that depends on this key — including the title lookup on
+ * the create page — stops working for everyone until midnight Pacific.
+ *
+ * So this is deliberately not a search-as-you-type field. Callers debounce and
+ * the route caches and rate limits; between them a single person exploring for
+ * a few minutes should cost a handful of units rather than a hundred.
+ */
+export async function searchYouTube(query: string, limit = 8): Promise<YouTubeResult[] | null> {
+  const key = process.env.YOUTUBE_API_KEY;
+  const trimmed = query.trim();
+  if (!key || trimmed.length < 2) return null;
+
+  try {
+    const endpoint = new URL("https://www.googleapis.com/youtube/v3/search");
+    endpoint.searchParams.set("part", "snippet");
+    endpoint.searchParams.set("type", "video");
+    // Anything the app cannot play is a result that wastes someone's click.
+    endpoint.searchParams.set("videoEmbeddable", "true");
+    endpoint.searchParams.set("maxResults", String(Math.min(limit, 12)));
+    endpoint.searchParams.set("q", trimmed);
+    endpoint.searchParams.set("key", key);
+
+    const response = await fetch(endpoint, { signal: AbortSignal.timeout(6000), cache: "no-store" });
+    if (!response.ok) {
+      // 403 here is usually the daily quota, which is worth naming in the log:
+      // it looks like "search is broken" from the outside and is not.
+      console.error("YouTube search failed:", response.status, await response.text().catch(() => ""));
+      return null;
+    }
+
+    const data = await response.json();
+    return (data?.items ?? [])
+      .map((item: any) => ({
+        id: item?.id?.videoId ?? "",
+        title: decodeEntities(item?.snippet?.title ?? ""),
+        channel: item?.snippet?.channelTitle ?? null,
+        posterUrl: item?.snippet?.thumbnails?.medium?.url ?? youtubeThumbnail(item?.id?.videoId ?? "")
+      }))
+      .filter((item: YouTubeResult) => item.id && item.title);
+  } catch (error) {
+    console.error("YouTube search error:", error);
+    return null;
+  }
+}
+
+/**
+ * YouTube returns titles with HTML entities in them — &amp;, &#39; and the rest
+ * — because the field was designed to be dropped into a page. React escapes
+ * what it renders, so left alone they show up literally.
+ */
+function decodeEntities(value: string) {
+  return value
+    .replace(/&quot;/g, '"')
+    .replace(/&#39;/g, "'")
+    .replace(/&lt;/g, "<")
+    .replace(/&gt;/g, ">")
+    .replace(/&amp;/g, "&");
+}

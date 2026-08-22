@@ -748,6 +748,37 @@ io.on("connection", rawSocket => {
     }
   });
 
+  /**
+   * The video reached its end on the host's machine.
+   *
+   * Sent as its own event rather than inferred from a pause at the duration:
+   * the server does not know how long the video is, so "paused near the end"
+   * and "ended" are the same message to it — and guessing wrong means either a
+   * queue that never advances or one that skips a film because someone paused
+   * to answer the door.
+   *
+   * Only the host's copy reports this. Every viewer reaches the end too, and
+   * five people announcing it would advance the queue five times.
+   */
+  socket.on("playback:ended", async ({ partyId }) => {
+    if (!(await requireHost(socket, partyId))) return;
+
+    const next = await prisma.queueItem.findFirst({ where: { partyId }, orderBy: { position: "asc" } });
+    if (!next) return;
+
+    try {
+      const party = await applyVideo(partyId, next.contentType, next.contentUrl);
+      await prisma.queueItem.delete({ where: { id: next.id } });
+      emitState(partyId, party);
+      await emitQueue(partyId);
+      io.to(roomFor(partyId)).emit("queue:advanced", { title: next.title });
+    } catch {
+      // A queue item that will not load must not take the room down with it.
+      // The film that just finished stays up and the host can pick manually.
+      socket.emit("error:unauthorized", { message: "تعذر تشغيل التالي في القائمة" });
+    }
+  });
+
   socket.on("control:request", async ({ partyId }) => {
     const member = await memberFor(socket, partyId);
     if (!member || member.role === "host") return;

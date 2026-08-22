@@ -22,6 +22,8 @@ export type StageProps = {
   onUnmute: () => void;
   onYtError: (message: string | null) => void;
   onBuffering: (buffering: boolean) => void;
+  /** The media reached its end. Only the host's copy is acted on. */
+  onEnded: () => void;
   /** Fires once a player can accept a seek, so a queued join position lands. */
   onPlayerReady: () => void;
   /** Rendered inside the stage, so it survives the fullscreen subtree. */
@@ -154,7 +156,11 @@ export const VideoStage = forwardRef<StageHandle, StageProps>(function VideoStag
             onSeeked={() => isHost && props.onControl("seek", props.videoRef.current?.currentTime || 0)}
             // Without this the party stays "playing" past the end forever, and
             // the server's live timestamp keeps growing past the runtime.
-            onEnded={() => isHost && props.onControl("pause", props.videoRef.current?.duration || 0)}
+            onEnded={() => {
+              if (!isHost) return;
+              props.onControl("pause", props.videoRef.current?.duration || 0);
+              props.onEnded();
+            }}
           />
         ) : (
           <div className={`relative ${fullscreen ? "h-full max-h-full w-full" : "aspect-video w-full"}`}>
@@ -168,6 +174,7 @@ export const VideoStage = forwardRef<StageHandle, StageProps>(function VideoStag
               onControl={props.onControl}
               onError={props.onYtError}
               onBuffering={props.onBuffering}
+              onEnded={() => isHost && props.onEnded()}
             />
             {/* Nobody drives the embed directly — the host uses our bar, and a
                 stray click on the iframe would desync the room. */}

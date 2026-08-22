@@ -320,6 +320,9 @@ export function PartyRoom({ party, userId }: { party: Party; userId: string }) {
         );
 
         client.on("queue:updated", ({ items }: { items: QueueItem[] }) => setQueue(items));
+        client.on("queue:advanced", ({ title }: { title: string }) =>
+          setNotice(`خلص. بندوّر على اللي بعده: ${title}`)
+        );
         client.on("reaction:received", ({ emoji, name }: { emoji: string; name: string }) => {
           const key = `${Date.now()}-${Math.random()}`;
           setReactions(items => [...items, { key, emoji, name, offset: 10 + Math.random() * 75 }]);
@@ -636,6 +639,10 @@ export function PartyRoom({ party, userId }: { party: Party; userId: string }) {
             onUnmute={unmute}
             onYtError={setYtError}
             onBuffering={isBuffering => emit("viewer:buffering", { isBuffering })}
+            // Only the host's copy is listened to — everyone reaches the end,
+            // and five announcements would advance the queue five times. The
+            // server checks this again rather than trusting it.
+            onEnded={() => isHostRef.current && emit("playback:ended")}
             ref={stageRef}
             rate={roomRate}
             onRateChange={next => emit("control:rate", { rate: next })}

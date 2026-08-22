@@ -13,19 +13,21 @@ export type PlayerHandle = {
   /** Used to drift back into sync gradually instead of seeking. */
   setRate: (rate: number) => void;
 };
-export function YouTubePlayer({ videoId, enabled, onReady, onControl, onError, onBuffering }: { videoId: string; enabled: boolean; onReady: (player: PlayerHandle) => void; onControl: (type: "play" | "pause" | "seek", timestamp: number) => void; onError?: (errorMsg: string) => void; onBuffering?: (buffering: boolean) => void }) {
+export function YouTubePlayer({ videoId, enabled, onReady, onControl, onError, onBuffering, onEnded }: { videoId: string; enabled: boolean; onReady: (player: PlayerHandle) => void; onControl: (type: "play" | "pause" | "seek", timestamp: number) => void; onError?: (errorMsg: string) => void; onBuffering?: (buffering: boolean) => void; onEnded?: () => void }) {
   const containerRef = useRef<HTMLDivElement>(null);
   const playerRef = useRef<any>();
   const onReadyRef = useRef(onReady);
   const onControlRef = useRef(onControl);
   const onErrorRef = useRef(onError);
   const onBufferingRef = useRef(onBuffering);
+  const onEndedRef = useRef(onEnded);
 
   useEffect(() => {
     onReadyRef.current = onReady;
     onControlRef.current = onControl;
     onErrorRef.current = onError;
     onBufferingRef.current = onBuffering;
+    onEndedRef.current = onEnded;
   }, [onReady, onControl, onError, onBuffering]);
 
   useEffect(() => {
@@ -146,6 +148,11 @@ export function YouTubePlayer({ videoId, enabled, onReady, onControl, onError, o
               if (event.data === window.YT.PlayerState.ENDED) {
                 const end = typeof playerInstance?.getDuration === "function" ? playerInstance.getDuration() || 0 : 0;
                 onControlRef.current("pause", end);
+                // Reported separately from the pause it also sends. The server
+                // cannot tell the two apart — it does not know the duration —
+                // and guessing gives either a queue that never advances or one
+                // that skips a film because somebody paused near the end.
+                onEndedRef.current?.();
               }
             }
           }

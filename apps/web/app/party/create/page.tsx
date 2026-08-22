@@ -5,6 +5,7 @@ import { useCallback, useEffect, useState } from "react";
 import { VideoLibrary, type LibraryVideo } from "@/components/video-library";
 import { VideoPicker, type PickedVideo } from "@/components/video-picker";
 import { YouTubePreview, type YouTubeMeta } from "@/components/youtube-preview";
+import { YouTubeSearch } from "@/components/youtube-search";
 import { PLATFORMS, parsePlatformLink, platformBySlug, type PlatformSlug } from "@/lib/platforms";
 import { Button } from "@/components/ui/button";
 import { Card, Kicker } from "@/components/ui/card";
@@ -237,6 +238,7 @@ export default function CreateParty() {
                 <Field label="رابط فيديو YouTube">
                   <Input required dir="ltr" placeholder="https://youtube.com/watch?v=…" value={contentUrl} onChange={event => setContentUrl(event.target.value)} />
                 </Field>
+                <YouTubeSearch onPick={result => setContentUrl(`https://www.youtube.com/watch?v=${result.id}`)} />
                 <YouTubePreview url={contentUrl} onMeta={takeYouTube} />
               </div>
             ) : chosen ? (
