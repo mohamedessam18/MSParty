@@ -22,11 +22,21 @@ export function mailConfigured() {
 export async function sendMail({
   to,
   subject,
-  html
+  html,
+  text
 }: {
   to: string;
   subject: string;
   html: string;
+  /**
+   * The same message as plain text.
+   *
+   * Not optional in practice: an HTML-only message is one of the oldest and
+   * cheapest spam signals there is, because real senders build both parts and
+   * bulk senders usually do not. It is also the version that gets read by
+   * anything that cannot render HTML at all.
+   */
+  text: string;
 }): Promise<MailResult> {
   if (!mailConfigured()) return { sent: false, reason: "not_configured" };
 
@@ -37,7 +47,16 @@ export async function sendMail({
         Authorization: `Bearer ${process.env.RESEND_API_KEY}`,
         "Content-Type": "application/json"
       },
-      body: JSON.stringify({ from: process.env.MAIL_FROM, to: [to], subject, html })
+      body: JSON.stringify({
+        from: process.env.MAIL_FROM,
+        to: [to],
+        subject,
+        html,
+        text,
+        // A reply that goes nowhere is another thing filters count against a
+        // sender. Set only when there is somewhere for it to go.
+        ...(process.env.MAIL_REPLY_TO ? { reply_to: process.env.MAIL_REPLY_TO } : {})
+      })
     });
 
     if (!response.ok) {

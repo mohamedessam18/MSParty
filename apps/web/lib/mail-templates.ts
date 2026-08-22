@@ -44,6 +44,12 @@ export function verifyEmailTemplate(name: string, token: string) {
       `<p style="margin:0">فاضل خطوة واحدة: أكّد إن البريد ده بتاعك عشان نقدر نوصلك لو حصل حاجة في حسابك.</p>
        ${button(href, "أكّد البريد")}
        <p style="margin:0;font-size:13px;color:${DIM}">الرابط بيقف بعد 24 ساعة.</p>`
+    ),
+    text: plain(
+      `أهلاً ${name}،`,
+      "فاضل خطوة واحدة: أكّد إن البريد ده بتاعك عشان نقدر نوصلك لو حصل حاجة في حسابك.",
+      href,
+      "الرابط بيقف بعد 24 ساعة."
     )
   };
 }
@@ -58,6 +64,12 @@ export function resetPasswordTemplate(name: string, token: string) {
        ${button(href, "اختار كلمة مرور جديدة")}
        <p style="margin:0;font-size:13px;color:${DIM}">الرابط بيقف بعد ساعة، وبيشتغل مرة واحدة بس.</p>
        <p style="margin:14px 0 0;font-size:13px;color:${DIM}">لما تغيّرها، أي جهاز داخل بحسابك هيتسجّل خروجه تلقائيًا.</p>`
+    ),
+    text: plain(
+      `أهلاً ${name}،`,
+      "اضغط الرابط ده وتحط كلمة مرور جديدة لحسابك في MSParty.",
+      href,
+      "الرابط بيقف بعد ساعة وبيشتغل مرة واحدة بس. لما تغيّرها، أي جهاز داخل بحسابك هيتسجّل خروجه."
     )
   };
 }
@@ -72,6 +84,12 @@ export function changeEmailTemplate(name: string, newEmail: string, token: strin
        <b>${escapeHtml(newEmail)}</b>. أكّد إنه بتاعك عشان التغيير يتم.</p>
        ${button(href, "أكّد البريد الجديد")}
        <p style="margin:0;font-size:13px;color:${DIM}">لحد ما تضغط، حسابك لسه على بريده القديم.</p>`
+    ),
+    text: plain(
+      `أهلاً ${name}،`,
+      `إنت طلبت تخلي بريد حسابك هو ${newEmail}. أكّد إنه بتاعك عشان التغيير يتم.`,
+      href,
+      "لحد ما تضغط الرابط، حسابك لسه على بريده القديم."
     )
   };
 }
@@ -86,6 +104,12 @@ export function deletionScheduledTemplate(name: string, daysLeft: number, erases
        <b>${formatDate(erasesAt)}</b> — يعني فاضل <b>${daysLeft} يوم</b>.</p>
        <p style="margin:14px 0 0">لو غيّرت رأيك، سجّل الدخول في أي وقت قبل الميعاد ده وهنسألك لو عايز ترجّعه.</p>
        ${button(href, "رجّع حسابي")}`
+    ),
+    text: plain(
+      `أهلاً ${name}،`,
+      `حسابك اتخفى من دلوقتي، وهيتمسح نهائيًا يوم ${formatDate(erasesAt)} — يعني فاضل ${daysLeft} يوم.`,
+      href,
+      "لو غيّرت رأيك، سجّل الدخول في أي وقت قبل الميعاد ده وهنسألك لو عايز ترجّعه."
     )
   };
 }
@@ -99,6 +123,12 @@ export function deletionReminderTemplate(name: string, daysLeft: number, erasesA
       `<p style="margin:0">أهلاً ${escapeHtml(name)}، حسابك هيتمسح نهائيًا يوم <b>${formatDate(erasesAt)}</b>.</p>
        <p style="margin:14px 0 0">بعد الميعاد ده مش هينفع نرجّعه — سهراتك وفيديوهاتك وصورك بيتمسحوا خلاص.</p>
        ${button(href, "رجّع حسابي دلوقتي")}`
+    ),
+    text: plain(
+      `أهلاً ${name}،`,
+      `حسابك هيتمسح نهائيًا يوم ${formatDate(erasesAt)} — فاضل ${daysLeft} يوم. بعد كده مش هينفع يرجع.`,
+      href,
+      "لو عايز ترجّعه، سجّل الدخول من الرابط ده."
     )
   };
 }
@@ -110,8 +140,36 @@ export function deletionDoneTemplate(name: string) {
       "تم الحذف",
       `<p style="margin:0">أهلاً ${escapeHtml(name)}، حسابك وكل اللي عليه اتمسحوا نهائيًا زي ما طلبت.</p>
        <p style="margin:14px 0 0">شكرًا إنك كنت معانا. لو حبيت ترجع في أي وقت، تقدر تعمل حساب جديد من الأول.</p>`
+    ),
+    text: plain(
+      `أهلاً ${name}،`,
+      "حسابك وكل اللي عليه اتمسحوا نهائيًا زي ما طلبت.",
+      "",
+      "شكرًا إنك كنت معانا. لو حبيت ترجع في أي وقت، تقدر تعمل حساب جديد من الأول."
     )
   };
+}
+
+/**
+ * The plain-text half.
+ *
+ * Written per template rather than produced by stripping the HTML: a stripped
+ * version reads like debris, and a filter comparing the two parts is checking
+ * that they say the same thing — which is easier to guarantee by writing them
+ * both than by mangling one into the other.
+ */
+function plain(greeting: string, body: string, href: string, footer: string) {
+  return [
+    greeting,
+    "",
+    body,
+    ...(href ? ["", href] : []),
+    "",
+    footer,
+    "",
+    "لو مش إنت اللي طلبت ده، تجاهل الرسالة دي.",
+    "MSParty"
+  ].join("\n");
 }
 
 function formatDate(date: Date) {
