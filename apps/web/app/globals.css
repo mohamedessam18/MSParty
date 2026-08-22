@@ -155,6 +155,57 @@
     50% { opacity: 0.35; }
   }
 
+  /* --- Buttons with a side to them --------------------------------------
+     A flat rectangle that changes colour on hover is a diagram of a button.
+     This is the object: a lit top face, an extruded base below it in a darker
+     shade of its own colour, and a press that actually travels — the face
+     moves down by exactly the height of the base, so at the bottom of the
+     press there is no base left and the thing is flat against the page.
+
+     Depth and base colour come from custom properties, so each variant sets
+     its own without a second copy of the mechanics. */
+  .btn-3d {
+    --btn-depth: 4px;
+    --btn-base: rgb(0 0 0 / 0.45);
+    position: relative;
+    box-shadow:
+      inset 0 1px 0 rgb(255 255 255 / 0.16),
+      0 var(--btn-depth) 0 0 var(--btn-base),
+      0 calc(var(--btn-depth) + 3px) 12px -2px rgb(0 0 0 / 0.55);
+    transition:
+      transform 0.11s cubic-bezier(0.2, 0.8, 0.3, 1),
+      box-shadow 0.11s cubic-bezier(0.2, 0.8, 0.3, 1),
+      background-color 0.15s;
+    will-change: transform;
+  }
+
+  /* Lifts, and the base grows to match — the light source stays put, so a
+     button further from the page casts further. */
+  .btn-3d:hover:not(:disabled) {
+    transform: translateY(-1px);
+    box-shadow:
+      inset 0 1px 0 rgb(255 255 255 / 0.22),
+      0 calc(var(--btn-depth) + 1px) 0 0 var(--btn-base),
+      0 calc(var(--btn-depth) + 6px) 16px -2px rgb(0 0 0 / 0.6);
+  }
+
+  /* All the way down. Travelling exactly --btn-depth is what makes it read as
+     bottoming out rather than as sliding. */
+  .btn-3d:active:not(:disabled) {
+    transform: translateY(var(--btn-depth));
+    box-shadow:
+      inset 0 1px 0 rgb(255 255 255 / 0.1),
+      0 0 0 0 var(--btn-base),
+      0 1px 3px 0 rgb(0 0 0 / 0.5);
+  }
+
+  /* A button that cannot be pressed should not look like it is standing up
+     waiting to be. */
+  .btn-3d:disabled {
+    box-shadow: inset 0 1px 0 rgb(255 255 255 / 0.06);
+    transform: none;
+  }
+
   /* --- Ten feet away ------------------------------------------------------
      A television is read from across a room and driven with four arrows and an
      OK button. Neither of those is a smaller phone, so the TV routes opt into
@@ -212,5 +263,11 @@
   /* Set from script, so the global transition override above does not reach it. */
   .stage-card {
     transform: none !important;
+  }
+  /* The button still moves when pressed. Reduced motion is about animation
+     nobody asked for, not about feedback to a deliberate act — a press with no
+     travel reads as a button that did not register. */
+  .btn-3d {
+    transition-duration: 0.01ms !important;
   }
 }
