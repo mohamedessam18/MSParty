@@ -27,10 +27,9 @@ export function YouTubeSearch({ onPick }: { onPick: (result: SearchResult) => vo
   // Guards against a slow first reply landing after a faster second one.
   const sequence = useRef(0);
 
-  async function search(event: React.FormEvent) {
-    event.preventDefault();
+  async function search() {
     const trimmed = query.trim();
-    if (trimmed.length < 2) return;
+    if (trimmed.length < 2 || busy) return;
 
     const ticket = ++sequence.current;
     setBusy(true);
@@ -54,17 +53,32 @@ export function YouTubeSearch({ onPick }: { onPick: (result: SearchResult) => vo
 
   return (
     <div className="space-y-3">
-      <form onSubmit={search} className="flex gap-2">
+      {/* Not a <form>, and the button is not a submit.
+          
+          This lives inside the create page's own form, and HTML does not allow
+          a form inside a form — the browser drops the inner one, so its submit
+          handler never runs and its button ends up submitting the *outer*
+          form. Searching for a film would have tried to create the party.
+          
+          Enter still works, by handling the key here rather than by relying on
+          implicit submission. */}
+      <div className="flex gap-2">
         <Input
           placeholder="دوّر على فيلم أو حلقة..."
           value={query}
           onChange={event => setQuery(event.target.value)}
+          onKeyDown={event => {
+            if (event.key !== "Enter") return;
+            // Otherwise Enter reaches the create form and submits that.
+            event.preventDefault();
+            search();
+          }}
           aria-label="بحث في يوتيوب"
         />
-        <Button type="submit" disabled={busy || query.trim().length < 2}>
+        <Button type="button" onClick={search} disabled={busy || query.trim().length < 2}>
           {busy ? "..." : "دوّر"}
         </Button>
-      </form>
+      </div>
 
       {error && <FormError>{error}</FormError>}
 
