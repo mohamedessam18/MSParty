@@ -5,6 +5,7 @@ import { Button } from "@/components/ui/button";
 import { Kicker } from "@/components/ui/card";
 import { Rule, Wordmark } from "@/components/ui/wordmark";
 import { CinemaHero } from "@/components/cinema-hero";
+import { CinemaStage } from "@/components/three/cinema-stage";
 
 const steps = [
   { number: "01", title: "الهوست يفتح السهرة", copy: "يختار فيديو YouTube أو يرفع واحد، وياخد مكانه قدام الشاشة." },
@@ -68,7 +69,9 @@ export default async function Home() {
           <p className="mt-4 text-xs text-ivory-dim/70">عندك رابط؟ افتحه وادخل مباشرة.</p>
         </div>
 
-        <CinemaHero />
+        {/* The real room, with the CSS one underneath it as what shows when
+            WebGL is unavailable, refused, or still loading. */}
+        <CinemaStage className="aspect-[4/3] w-full" fallback={<CinemaHero />} />
       </section>
 
       <section className="border-t border-velvet-hi bg-ink-deep/50">

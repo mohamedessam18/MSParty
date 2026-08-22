@@ -1,4 +1,5 @@
 import { Rule, Wordmark } from "@/components/ui/wordmark";
+import { CinemaStage } from "@/components/three/cinema-stage";
 import { TiltStage } from "./tilt-stage";
 
 /**
@@ -23,8 +24,19 @@ export function AuthShell({
   footer?: React.ReactNode;
 }) {
   return (
-    <main className="stage stage-glow relative mx-auto flex min-h-screen max-w-md flex-col justify-center px-5 py-10">
-      <Wordmark className="mb-7 self-start" />
+    <>
+      {/* Outside <main> on purpose. `.stage` sets a CSS perspective, and a
+          perspective makes a containing block for fixed descendants — nested
+          inside, this was pinned to the width of the card instead of the
+          window. Quieter than the landing page's too: these are screens people
+          came to get something done on, so the room is atmosphere rather than
+          the thing being looked at. */}
+      <div aria-hidden className="pointer-events-none fixed inset-0 -z-10 opacity-70">
+        <CinemaStage className="h-full w-full" quality="reduced" variant="atmosphere" fallback={null} />
+      </div>
+
+      <main className="stage stage-glow relative mx-auto flex min-h-screen max-w-md flex-col justify-center px-5 py-10">
+        <Wordmark className="mb-7 self-start" />
 
       <TiltStage>
         <div className="bevel relative rounded-xl bg-velvet/80 p-6 backdrop-blur-sm sm:p-8">
@@ -47,7 +59,8 @@ export function AuthShell({
         </div>
       </TiltStage>
 
-      {footer && <div className="mt-6 text-center text-sm text-ivory-dim">{footer}</div>}
-    </main>
+        {footer && <div className="mt-6 text-center text-sm text-ivory-dim">{footer}</div>}
+      </main>
+    </>
   );
 }

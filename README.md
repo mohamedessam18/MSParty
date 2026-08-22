@@ -35,6 +35,24 @@ Three ways in, all landing on the same `User` row:
 
 Attempt counters for all three live in the `RateLimit` table rather than in memory: the web app is serverless, so a per-instance counter resets often enough to be no limit at all.
 
+## The room on the landing page
+
+`/` and the sign-in screens render an actual cinema in WebGL — a lit screen,
+curtains, an audience in silhouette, and a projector beam with dust moving
+through it. Built against three's own API rather than a React renderer: the
+scene is constructed once and only read from afterwards, so a reconciler would
+be a second copy of the scene graph and another fifty kilobytes to describe a
+room that never changes shape.
+
+It is a background, and it is allowed to simply not happen. No WebGL, a reader
+who asked for less motion, a machine that cannot spare the frames — in every
+case the CSS cinema that was already here stays on screen instead, and it is
+what shows while three is still downloading. three is imported on demand, so
+the shared bundle is unchanged and no other page pays for it.
+
+The sign-in screens get the same room with the furniture left out: the beam,
+the dust and the glow, and nothing to look at behind a password field.
+
 ## Televisions
 
 `/tv` is the ten-foot screen: full-bleed video, type sized to be read across a room, and a control surface of exactly one button — OK shows the chat and who is watching, Back hides it.
